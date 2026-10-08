@@ -266,7 +266,7 @@
     }
     const I = integralSteps({ G, v, a: A, b: B, factor, factorQ: method === 'washer' ? q(1) : q(2), pi: true, what });
     steps.push(...I.steps);
-    sol.push(`$$\\begin{aligned}V &= ${I.lines[0]}\\\\ &${I.lines[1]}\\end{aligned}$$`);
+    sol.push(`$$V = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`);
     if (isYform) sol.unshift(`Integrating \\(dy\\), so every boundary is written as \\(x = g(y)\\): right \\(x = ${fn(hi)}\\), left \\(x = ${fn(lo)}\\).`);
     const methodWord = method === 'washer' ? 'the disk/washer method' : 'the shell method';
     const raw = R.raw;
@@ -310,7 +310,7 @@
       steps, answer: I.ans, region: R, fac: sh.fQ.v * (sh.pi ? Math.PI : 1),
       solution: [`Slices perpendicular to the ${v}-axis have thickness \\(d${v}\\); ${v} runs from \\(${T(A.str())}\\) to \\(${T(B.str())}\\).`,
         `$$s(${v}) = ${T(side.str(v))},\\qquad A(${v}) = ${sh.tex}$$`,
-        `$$\\begin{aligned}V &= ${I.lines[0]}\\\\ &${I.lines[1]}\\end{aligned}$$`],
+        `$$V = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`],
       // Independent truth: integrate over x; for dy slices integrate the y-form side length numerically.
       truth: () => sh.fQ.v * (sh.pi ? Math.PI : 1) * (perpY ? Check.simpson(y => (F.right.num(y) - F.left.num(y)) ** 2, F.c.v, F.d.v, 20000) : Check.simpson(sq, raw.a, raw.b, 20000)),
     });
@@ -364,7 +364,7 @@
     return finalize({
       statement, steps, answer: I.ans,
       solution: [`The curves meet at \\(${v} = ${T(a.str())}\\) and \\(${v} = ${T(b.str())}\\). ${names[0] === 'top' ? 'Top' : 'Right'} curve \\(${T(top.str(v))}\\), ${names[1]} curve \\(${T(bot.str(v))}\\).`,
-        `$$\\begin{aligned}A &= ${I.lines[0]}\\\\ &${I.lines[1]}\\end{aligned}$$`],
+        `$$A = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`],
       truth: () => Check.simpson(t => raw.top(t) - raw.bot(t), L, H, 20000),
     });
   }

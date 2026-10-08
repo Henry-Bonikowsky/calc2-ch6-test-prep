@@ -40,7 +40,26 @@
     for (const k of kids.flat()) if (k != null) el.append(k.nodeType ? k : document.createTextNode(k));
     return el;
   };
-  const math = el => { renderMathInElement(el, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false }); return el; };
+  const math = el => {
+    // Phones: formulas joined by \qquad go on separate lines.
+    if (matchMedia('(max-width: 600px)').matches) for (let w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), n; (n = w.nextNode());) n.data = n.data.replace(/,?\\qquad\s*/g, () => '$$$$');
+    renderMathInElement(el, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\[', right: '\\]', display: true }, { left: '\\(', right: '\\)', display: false }], throwOnError: false }); return el; };
+  // Phones: a formula chunk KaTeX can't wrap (one integral, one fraction) is shrunk to fit its box.
+  function fitMath() {
+    const ks = [...document.querySelectorAll('.katex')];
+    ks.forEach(k => { if (k.style.fontSize) k.style.fontSize = ''; });
+    const fits = ks.map(k => {
+      let box = k.parentElement; while (getComputedStyle(box).display.startsWith('inline')) box = box.parentElement;
+      const cs = getComputedStyle(box), avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const w = Math.max(0, ...[...k.querySelectorAll('.katex-html > .katex-base')].map(b => b.getBoundingClientRect().width));
+      return avail > 0 && w > avail ? Math.floor(parseFloat(getComputedStyle(k).fontSize) * avail / w * 0.97 * 10) / 10 + 'px' : '';
+    });
+    ks.forEach((k, i) => { if (fits[i]) k.style.fontSize = fits[i]; });
+  }
+  let fitQueued = false;
+  const queueFit = () => { if (!fitQueued) { fitQueued = true; requestAnimationFrame(() => { fitQueued = false; fitMath(); }); } };
+  new MutationObserver(queueFit).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  addEventListener('resize', queueFit);
   const texHTML = (expr, display) => { try { return katex.renderToString(Check.tex(expr), { throwOnError: false, displayMode: !!display }); } catch (e) { return String(expr); } };
   const dots = id => { const s = store.types[id] || { streak: 0 }; const n = Math.min(3, s.streak || 0); return mastered(id) ? h('span', { class: 'mastered' }, '✓ 3/3') : h('span', { class: 'dots', html: '<span class="on">' + '●'.repeat(n) + '</span>' + '○'.repeat(3 - n) }); };
   const INPUT_HELP = 'Type math like 3x^2 - 2x, sqrt(x), x^(3/2), pi, e^x, ln(x), 8pi/27. Use * before a parenthesis after pi: pi*(x+1). The preview shows how your input was read.';

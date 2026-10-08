@@ -51,7 +51,6 @@ aside h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transf
 .card .mist::before { content: "✗ "; }
 .card .when { color: var(--muted); font-size: 14px; }
 .card .chk { background: var(--goodbg); padding: 6px 10px; border-radius: 6px; font-size: 14px; }
-.formula { overflow-x: auto; }
 .opts { display: grid; gap: 8px; margin: 12px 0; }
 .opt { text-align: left; border: 1px solid var(--line); background: #fff; padding: 10px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
 .opt:hover:not(:disabled) { border-color: var(--accent); }
@@ -66,7 +65,16 @@ th { color: var(--muted); font-weight: 600; }
 .test-q { border-top: 2px solid var(--line); padding-top: 12px; margin-top: 18px; }
 .your { font-family: ui-monospace, monospace; }
 .inline-card { margin-top: 10px; }
-/* Phones: long formulas scroll inside their card instead of widening the page. */
+/* Phones: long text wraps instead of widening the page. */
 .card, .panel { min-width: 0; overflow-wrap: anywhere; }
-.katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 @media (max-width: 600px) { .katex-display > .katex { font-size: .85em; } main { padding: 12px; } }
+/* Let display math wrap at top-level = and + (KaTeX's line-break points) instead of overflowing. */
+.katex-display > .katex { white-space: normal; }
+/* Phones: test results table stacks one cell per line. */
+@media (max-width: 600px) {
+  #view-test table, #view-test tr, #view-test td { display: block; }
+  #view-test tr:first-child { display: none; }
+  #view-test tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
+  #view-test td { border: 0; padding: 2px 0; }
+  #view-test td:nth-child(2)::before { content: "Your answer: "; color: var(--muted); font-family: system-ui, sans-serif; }
+}

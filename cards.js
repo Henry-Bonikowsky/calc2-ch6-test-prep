@@ -170,7 +170,7 @@ window.CARDS = [
   },
   {
     id: 'force', sec: '6.7', title: 'Force and pressure on a vertical plate', types: ['force'],
-    formula: '$$F = \\int_0^{\\text{top of plate}} \\rho g\\,(\\text{depth})\\,w(y)\\,dy,\\qquad \\text{depth} = a - y$$ \\(y\\) up from the bottom of the plate, water surface at \\(y = a\\). Pressure \\(p = \\rho g\\cdot\\text{depth}\\).',
+    formula: '$$F = \\int_0^{\\text{top of plate}} \\rho g\\,(\\text{depth})\\,w(y)\\,dy$$ $$\\text{depth} = a - y$$ \\(y\\) up from the bottom of the plate, water surface at \\(y = a\\). Pressure \\(p = \\rho g\\cdot\\text{depth}\\).',
     when: 'Dam, window, plate submerged vertically; force on one side.',
     steps: [
       ['Coordinates: \\(y = 0\\) at the bottom of the plate; find \\(a\\) = height of the surface.', 'Forgetting that a plate sunk below the surface has \\(a > \\) plate height.'],
