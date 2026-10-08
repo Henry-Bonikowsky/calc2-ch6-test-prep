@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MA-172 Chapter 6 Test Prep</title>
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/katex/contrib/auto-render.min.js"></script>
+<script src="vendor/math.js"></script>
+<script src="check.js"></script>
+<script src="problems.js"></script>
+<script src="drill.js"></script>
+<script src="cards.js"></script>
+</head>
+<body>
+<header>
+  <h1>MA-172 · Chapter 6 Test Prep</h1>
+  <nav>
+    <button data-view="cards">Formula cards</button>
+    <button data-view="drill">Which method?</button>
+    <button data-view="practice">Step practice</button>
+    <button data-view="test">Practice test</button>
+    <button data-view="dash">Mastery</button>
+  </nav>
+  <div id="timer" hidden></div>
+</header>
+<main>
+  <section id="view-cards" class="view"></section>
+  <section id="view-drill" class="view"></section>
+  <section id="view-practice" class="view">
+    <aside id="type-list"></aside>
+    <div id="practice-main"></div>
+  </section>
+  <section id="view-test" class="view"></section>
+  <section id="view-dash" class="view"></section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
