@@ -14,7 +14,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; }
 .view { display: none; }
 .view.active { display: block; }
 #view-practice.active { display: grid; grid-template-columns: 270px 1fr; gap: 20px; align-items: start; }
-@media (max-width: 800px) { #view-practice.active { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { #view-practice.active { grid-template-columns: minmax(0, 1fr); } }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
 aside .panel { padding: 12px; }
 aside h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
@@ -42,8 +42,8 @@ aside h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); text-transf
 .solution { border-left: 4px solid var(--accent); padding: 4px 16px; background: #fafbff; margin-top: 14px; overflow-x: auto; }
 .solution h4 { margin: 8px 0; }
 .help { font-size: 13px; color: var(--muted); }
-.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: 16px; }
-@media (max-width: 600px) { .cards-grid { grid-template-columns: 1fr; } }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr)); gap: 16px; }
+@media (max-width: 600px) { .cards-grid { grid-template-columns: minmax(0, 1fr); } }
 .card h2 { font-size: 18px; margin: 0 0 8px; }
 .card ol { padding-left: 22px; }
 .card li { margin-bottom: 6px; }
@@ -66,3 +66,7 @@ th { color: var(--muted); font-weight: 600; }
 .test-q { border-top: 2px solid var(--line); padding-top: 12px; margin-top: 18px; }
 .your { font-family: ui-monospace, monospace; }
 .inline-card { margin-top: 10px; }
+/* Phones: long formulas scroll inside their card instead of widening the page. */
+.card, .panel { min-width: 0; overflow-wrap: anywhere; }
+.katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+@media (max-width: 600px) { .katex-display > .katex { font-size: .85em; } main { padding: 12px; } }
