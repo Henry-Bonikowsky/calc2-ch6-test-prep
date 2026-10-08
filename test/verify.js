@@ -61,6 +61,7 @@ function verifyRegion(p, R) {
 function verifyProblem(p) {
   renders(p, p.statement, 'statement');
   for (const s of p.solution) renders(p, s, 'solution');
+  verifyWork(p);
   const stepById = Object.fromEntries(p.steps.map(s => [s.id, s]));
   for (const s of p.steps) {
     renders(p, s.label, 'label ' + s.id);
@@ -137,6 +138,39 @@ function verifyProblem(p) {
   }
 }
 
+// Worked solution arithmetic: in every equation chain, any two neighbouring all-number sides
+// ("19.6 \times 450 = 8820", "-8\cdot 36 + 96\cdot 6 = -288 + 576") must be equal, and the solution
+// must arrive at the answer key. Sides with letters (F(6), x^2, \sqrt, \approx, ...) are skipped.
+function numSide(s) {
+  let e = s.replace(/(\\ )*\\text\{(?! cm)[^{}]*\}\s*$/, '').replace(/\\text\{[^{}]*\}/g, 'T') // trailing unit dropped; a named function like \text{top}(4) is not a number.replace(/\\left|\\right|\\big|\\Big|\\[,;!]|\\ |\\quad|\\qquad/g, ' ');
+  e = e.replace(/\\sqrt\{([^{}]*)\}/g, '(($1)**0.5)').replace(/\\sqrt\s*(\d+)/g, '($1**0.5)');
+  for (let k = 0; k < 4; k++) e = e.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))');
+  e = e.replace(/\\pi/g, '(PI)').replace(/\\times|\\cdot/g, '*').replace(/\\div/g, '/').replace(/\^\{([^{}]*)\}/g, '**($1)').replace(/\^/g, '**').replace(/[{}]/g, m => m === '{' ? '(' : ')');
+  e = e.replace(/([\d)])\s*\(/g, '$1*(').replace(/PI/g, String(Math.PI)).trim();
+  if (!e || !/^[-\d.\s+*/()]+$/.test(e) || !/\d/.test(e)) return null;
+  try { const v = Function(`return (${e})`)(); return isFinite(v) ? v : null; } catch (_) { return null; }
+}
+const workStats = {};
+function verifyWork(p) {
+  const st = workStats[p.type] = workStats[p.type] || { problems: 0, eqs: 0, reached: 0 };
+  st.problems++;
+  const blocks = []; const re = /\\\((.+?)\\\)|\$\$(.+?)\$\$/gs; let m;
+  for (const x of p.solution.join(' ').matchAll(re)) blocks.push(x[1] || x[2]);
+  let reached = p.value == null;
+  ok(!/10\^\{\+|\de\+\d/.test(p.solution.join(' ')), p, 'worked solution shows a number in scientific notation');
+  // ln / e / ^{3/2} answers are not parsed: there the rounded "\approx 2.2493" has to match instead.
+  for (const b of blocks) for (const [, x] of b.matchAll(/\\approx\s*(-?\d+(?:\.\d+)?)/g)) if (p.value != null && rel(Number(x), p.value, 1e-4)) reached = true;
+  for (const b of blocks) for (const chain of b.split(/,\s*\\qquad|\\qquad|\\quad|\\Rightarrow|\\checkmark|:/)) {
+    const vals = chain.split('=').map(numSide);
+    vals.forEach((v, i) => {
+      if (v != null && p.value != null && rel(v, p.value, 1e-9)) reached = true;
+      if (i && v != null && vals[i - 1] != null) { st.eqs++; ok(rel(vals[i - 1], v, 1e-9), p, `worked-solution arithmetic wrong: ${chain.split('=')[i - 1].trim()} = ${chain.split('=')[i].trim()}`); }
+    });
+  }
+  if (reached) st.reached++;
+  ok(reached, p, `worked solution never states the answer ${p.answer} as a number`);
+}
+
 const t0 = Date.now();
 const perType = {};
 for (const T of Gen.TYPES) {
@@ -183,7 +217,11 @@ for (let seed = 1; seed <= N * 3; seed++) {
   renders(fake, d.q + d.options.join(' ') + d.why, 'drill');
 }
 
+// Worked solutions must actually be worked: at least 3 checked arithmetic steps per problem on average.
+for (const [id, s] of Object.entries(workStats)) { checks++; if (!['arc-setup', 'hw'].includes(id) && s.eqs < 3 * s.problems) fails.push(`worked solution for ${id}: only ${s.eqs} checked arithmetic steps in ${s.problems} problems`); }
+
 const secs = ((Date.now() - t0) / 1000).toFixed(1);
+console.log('Checked arithmetic steps per worked solution: ' + Object.entries(workStats).map(([k, s]) => `${k} ${(s.eqs / s.problems).toFixed(1)}`).join(', '));
 console.log(`Problem types: ${Gen.TYPES.length}, problems per type: ${N}, drill questions: ${drillCount}`);
 console.log('Distinct statements per type: ' + Object.entries(perType).map(([k, v]) => `${k} ${v}`).join(', '));
 console.log('Homework answer keys: ' + hwKeys.join(' | '));

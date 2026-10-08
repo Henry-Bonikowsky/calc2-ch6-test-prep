@@ -105,6 +105,67 @@
   const $$ = s => `\\[${s}\\]`;
   const pr = s => /^[-]?[\w.]+$/.test(s) ? s : `(${s})`;
 
+  // ---------- worked-solution arithmetic: every operation written out ----------
+  const tq = x => (x.n < 0 ? '-' : '') + (x.d === 1 ? `${Math.abs(x.n)}` : `\\frac{${Math.abs(x.n)}}{${x.d}}`);
+  const tqp = x => x.n < 0 || x.d !== 1 ? `\\left(${tq(x)}\\right)` : tq(x);
+  const dn = x => { for (let k = 0; k <= 8; k++) if ((x.n * 10 ** k) % x.d === 0) return `${x.n * 10 ** k / x.d / 10 ** k}`; return tq(x); }; // decimal if it terminates
+  const jn = parts => parts.length ? parts.map((s, i) => i === 0 ? s : s.startsWith('-') ? ` - ${s.slice(1)}` : ` + ${s}`).join('') : '0';
+  const eqs = stages => stages.filter((s, i) => i === 0 || s !== stages[i - 1]).join(' = ');
+  const tpow = (x, p) => p.eq(1) ? tqp(x) : p.eq(new Q(1, 2)) ? `\\sqrt{${tq(x)}}` : `(${tq(x)})^{${tq(p)}}`;
+  const termT = (c, p, v) => (c.n < 0 ? '-' : '') + T(new GP([{ p, c: c.n < 0 ? c.neg() : c }]).str(v));
+  const gpT = (g, v) => jn(g.t.map(t => termT(t.c, t.p, v)));
+  const gpP = (g, v) => g.t.length > 1 || (g.t[0] && g.t[0].c.n < 0) ? `\\left(${gpT(g, v)}\\right)` : gpT(g, v);
+  // a1 + a2 + ... : common denominator, then the result
+  function sumStages(qs) {
+    const out = [jn(qs.map(tq))];
+    if (qs.some(x => x.isZero()) && qs.some(x => !x.isZero())) { qs = qs.filter(x => !x.isZero()); out.push(jn(qs.map(tq))); }
+    if (qs.length > 1) {
+      const D = qs.reduce((d, x) => d * x.d / gcd(d, x.d), 1);
+      if (D > 1 && qs.some(x => x.d !== D)) out.push(jn(qs.map(x => `${x.n < 0 ? '-' : ''}\\frac{${Math.abs(x.n) * D / x.d}}{${D}}`)));
+      if (D > 1) { const N = qs.reduce((s, x) => s + x.n * D / x.d, 0); out.push(`\\frac{${N}}{${D}}`); }
+      out.push(tq(qs.reduce((s, x) => s.add(x), q(0))));
+    }
+    return out;
+  }
+  // a · b : numerators and denominators multiplied, then reduced
+  function mulStages(a, b) {
+    const out = [`${tqp(a)}\\cdot ${tqp(b)}`];
+    if (a.d !== 1 || b.d !== 1) out.push(`\\frac{${a.n}\\cdot ${tqp(q(b.n))}}{${[a.d, b.d].filter(d => d !== 1).join('\\cdot ')}}`,`\\frac{${a.n * b.n}}{${a.d * b.d}}`);
+    out.push(tq(a.mul(b)));
+    return out;
+  }
+  const mulLine = (a, b) => eqs(mulStages(a, b));
+  // name(x) = substituted = powers worked out = products = sum
+  function evalAt(Fg, x, name = 'F') {
+    x = q(x);
+    const head = `${name}(${tq(x)})`;
+    if (!Fg.t.length) return `${head} = 0`;
+    const coef = c => c.eq(1) ? '' : c.eq(-1) ? '-' : `${tq(c)}\\cdot `;
+    const s1 = jn(Fg.t.map(t => t.p.isZero() ? tq(t.c) : coef(t.c) + tpow(x, t.p)));
+    const pv = Fg.t.map(t => t.p.isZero() ? q(1) : powQ(x, t.p));
+    const s2 = jn(Fg.t.map((t, i) => t.p.isZero() ? tq(t.c) : t.c.eq(1) || t.c.eq(-1) ? tq(t.c.mul(pv[i])) : `${tq(t.c)}\\cdot ${tqp(pv[i])}`));
+    return `${head} = ${eqs([s1, s2, ...sumStages(Fg.t.map((t, i) => t.c.mul(pv[i])))])}`;
+  }
+  // (A)(B) = every pairwise product = like terms combined
+  function mulGP(A, B, v) {
+    const pairs = []; for (const a of A.t) for (const b of B.t) pairs.push(termT(a.c.mul(b.c), a.p.add(b.p), v));
+    const l = gpP(A, v), r = gpP(B, v);
+    return eqs([l.startsWith('\\left') && r.startsWith('\\left') ? l + r : `${l}\\cdot ${r}`, jn(pairs), gpT(A.mul(B), v)]);
+  }
+  // ∫ G dv term by term with the power rule
+  function antiLine(G, v) {
+    const parts = G.t.map(t => { const p1 = t.p.add(1); const c = t.c.eq(1) ? '' : t.c.eq(-1) ? '-' : `${tq(t.c)}\\cdot `; return `${c}\\frac{${v}^{${p1.eq(1) ? '1' : tq(p1)}}}{${tq(p1)}}`; });
+    return `\\int ${gpP(G, v)}\\,d${v} = ${eqs([jn(parts), gpT(G.integ(), v)])}`;
+  }
+  // derivative term by term: d/dv (c v^p) = c·p v^(p-1)
+  const derivLine = (f, v) => eqs([jn(f.t.map(t => t.p.isZero() ? '0' : `${tq(t.c)}\\cdot ${tqp(t.p)}\\,${v}^{${tq(t.p.sub(1))}}`)), gpT(f.deriv(), v)]);
+  // F(b) - F(a), worked
+  const diffLine = (Fb, Fa, b, a, name = 'F') => `${name}(${tq(q(b))}) - ${name}(${tq(q(a))}) = ${eqs([`${tq(Fb)} - ${tqp(Fa)}`, ...(Fa.isZero() ? [tq(Fb)] : sumStages([Fb, Fa.neg()]))])}`;
+  // where the two boundary curves sit at each bound
+  function boundsWork(top, bot, A, B, v, names) {
+    return [A, B].map(x => { const d = top.sub(bot).at(x); return `At \\(${v} = ${tq(x)}\\): $$${evalAt(top, x, names[0])},\\qquad ${evalAt(bot, x, names[1])}$$ ${d.isZero() ? 'Equal, so the curves meet here.' : `Not equal, so the region is closed off by the line \\(${v} = ${tq(x)}\\) here.`}`; });
+  }
+
   function finalize(p) {
     // Drop mistake candidates that are actually equivalent to the correct answer, and duplicates.
     for (const s of p.steps) {
@@ -127,7 +188,7 @@
 
   // Standard integrate-and-evaluate steps + solution lines for factor * ∫_a^b G dv, G a GP.
   function integralSteps(o) {
-    const { G, v, a, b, factor = '', factorQ = q(1), pi = false, what, unit = '' } = o;
+    const { G, v, a, b, factor = '', factorQ = q(1), pi = false, what, unit = '', sym = 'V', anti = 'F', dec = false } = o;
     const F = G.integ(), Fb = F.at(b), Fa = F.at(a), val = Fb.sub(Fa).mul(factorQ);
     const lo = Math.min(a.v, b.v), hi = Math.max(a.v, b.v);
     const ans = exactPi(val, pi);
@@ -142,11 +203,24 @@
       { id: 'final', label: `${what} (exact, e.g. 8pi/27, or decimal to 4 significant digits)`, kind: 'num', ans, mistakes, hint: `Plug in: F(${b.str()}) − F(${a.str()}), then multiply by ${factor || 'the constant out front'}.` }
     ];
     const pre = factor ? factor : '';
-    const lines = [
-      `${pre}\\int_{${T(a.str())}}^{${T(b.str())}} \\left(${T(G.str(v))}\\right) d${v} = ${pre}\\Big[${T(F.str(v))}\\Big]_{${T(a.str())}}^{${T(b.str())}}`,
-      `= ${pre}\\left(${T(Fb.str())} - ${Fa.v < 0 ? '\\left(' + T(Fa.str()) + '\\right)' : T(Fa.str())}\\right) = ${T(ans)}${unit ? '\\ \\text{' + unit + '}' : ''} \\approx ${fmt(Check.evalNum(ans))}`
+    const D = Fb.sub(Fa), u = unit ? '\\ \\text{' + unit + '}' : '';
+    const work = [
+      `$$${sym} = ${pre}\\int_{${tq(a)}}^{${tq(b)}} \\left(${gpT(G, v)}\\right) d${v} = ${pre}\\Big[${anti}(${v})\\Big]_{${tq(a)}}^{${tq(b)}} = ${pre}\\big(${anti}(${tq(b)}) - ${anti}(${tq(a)})\\big)$$`,
+      `Antiderivative, one term at a time (power rule \\(\\int ${v}^n\\,d${v} = \\frac{${v}^{n+1}}{n+1}\\)):`,
+      `$$${anti}(${v}) = ${antiLine(G, v)}$$`,
+      `Plug in the top bound, then the bottom bound:`,
+      `$$${evalAt(F, b, anti)}$$`, `$$${evalAt(F, a, anti)}$$`,
+      `$$${diffLine(Fb, Fa, b, a, anti)}$$`,
     ];
-    return { steps, lines, ans, val };
+    const ansT = dec ? `${dn(val)}${pi ? '\\pi' : ''}` : T(ans); // T() turns 117600 into 1.176e5
+    // dec: 6.7 constants (62.5, 9800) read better as a decimal product when everything terminates
+    const decMul = dec && ![factorQ, D, val].some(x => dn(x).includes('frac')) ? [`${dn(factorQ)} \\times ${D.n < 0 ? `(${dn(D)})` : dn(D)}${pi ? '\\,\\pi' : ''}`, `${dn(val)}${pi ? '\\pi' : ''}`] : null;
+    if (pre) work.push(`Multiply by the constant out front, \\(${pre}\\):`, `$$${sym} = ${eqs([`${pre}\\cdot ${tqp(D)}`, ...(factorQ.eq(1) ? [] : decMul || mulStages(factorQ, D).map(s => pi ? `${s}\\cdot\\pi` : s)), ansT])}${u}$$`);
+    else work.push(`$$${sym} = ${ansT}${u}$$`);
+    const approx = Check.evalNum(ans), apT = dec ? `${+approx.toFixed(2)}` : fmt(approx);
+    if (pi) work.push(`$$${ansT} = ${dn(val)}\\times 3.14159\\ldots \\approx ${apT}${u}$$`);
+    else if (dn(val) !== apT) work.push(`$$${ansT} \\approx ${apT}${u}$$`);
+    return { steps, work, ans, val };
   }
 
   // ---------- region bank (for 6.2-6.4) ----------
@@ -242,7 +316,10 @@
           ...(disk ? [] : [{ ans: `(${Rr.str(v)})^2`, msg: 'You left out the hole: subtract r².' }])],
         hint: 'Square R, square r, subtract. Expanding is optional.' });
       sol.push(`${disk ? 'Disk' : 'Washer'} slices are perpendicular to the axis ${axisLine}, so they have thickness \\(${dv}\\); ${v} runs from \\(${T(A.str())}\\) to \\(${T(B.str())}\\).`);
-      sol.push(`$$R(${v}) = ${fn(Rr)},\\qquad r(${v}) = ${fn(rr)}${disk ? '\\ (\\text{disk: no hole})' : ''}$$`);
+      const distT = g => side === 'low' ? `${gpP(g, v)} - ${tqp(kk)}` : `${tq(kk)} - ${gpP(g, v)}`;
+      sol.push(`Radius = distance from the axis ${axisLine} to the boundary:`, `$$R(${v}) = ${distT(far)} = ${fn(Rr)},\\qquad r(${v}) = ${distT(near)} = ${fn(rr)}${disk ? '\\ (\\text{disk: no hole})' : ''}$$`);
+      sol.push(`Square each radius, multiplying out every term:`, `$$R^2 = ${mulGP(Rr, Rr, v)}$$`, ...(disk ? [] : [`$$r^2 = ${mulGP(rr, rr, v)}$$`]));
+      sol.push(`$$R^2 - r^2 = ${eqs([`${gpP(Rr.sq(), v)} - ${gpP(rr.sq(), v)}`, jn([...Rr.sq().t.map(t => termT(t.c, t.p, v)), ...rr.sq().t.map(t => termT(t.c.neg(), t.p, v))]), gpT(G, v)])}$$`);
       sol.push(`$$V = \\pi\\int_{${T(A.str())}}^{${T(B.str())}} \\left[\\left(${fn(Rr)}\\right)^2 - \\left(${fn(rr)}\\right)^2\\right] ${dv} = \\pi\\int_{${T(A.str())}}^{${T(B.str())}} \\left(${fn(G)}\\right) ${dv}$$`);
     } else {
       const rad = side === 'low' ? GP.x(1).sub(kk) : (kk.isZero() ? GP.x(1).neg() : GP.k(k).sub(GP.x(1)));
@@ -261,12 +338,14 @@
         mistakes: [{ ans: height.str(v), msg: 'You left out the radius. Shell integrand = (radius)(height).' }, { ans: rad.str(v), msg: 'You left out the height. Shell integrand = (radius)(height).' }, { ans: `(${rad.str(v)}) * (${height.str(v)})^2`, msg: 'Nothing is squared in the shell method: (radius)(height).' }],
         hint: 'Multiply your radius by your height (expanding is optional).' });
       sol.push(`Shells are parallel to the axis ${axisLine}, so they have thickness \\(${dv}\\); ${v} runs from \\(${T(A.str())}\\) to \\(${T(B.str())}\\).`);
-      sol.push(`$$\\text{radius} = ${fn(rad)},\\qquad \\text{height} = ${fn(height)}$$`);
+      sol.push(`$$\\text{radius} = ${side === 'low' ? `${v} - ${tqp(kk)}` : `${tq(kk)} - ${v}`} = ${fn(rad)},\\qquad \\text{height} = ${gpP(hi, v)} - ${gpP(lo, v)} = ${fn(height)}$$`);
+      sol.push(`Multiply radius by height, every term:`, `$$\\text{radius}\\cdot\\text{height} = ${mulGP(rad, height, v)}$$`);
       sol.push(`$$V = 2\\pi\\int_{${T(A.str())}}^{${T(B.str())}} \\left(${fn(rad)}\\right)\\left(${fn(height)}\\right) ${dv} = 2\\pi\\int_{${T(A.str())}}^{${T(B.str())}} \\left(${fn(G)}\\right) ${dv}$$`);
     }
     const I = integralSteps({ G, v, a: A, b: B, factor, factorQ: method === 'washer' ? q(1) : q(2), pi: true, what });
     steps.push(...I.steps);
-    sol.push(`$$V = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`);
+    sol.push(...I.work);
+    sol.splice(1, 0, ...boundsWork(hi, lo, A, B, v, isYform ? ['\\text{right}', '\\text{left}'] : ['\\text{top}', '\\text{bottom}']));
     if (isYform) sol.unshift(`Integrating \\(dy\\), so every boundary is written as \\(x = g(y)\\): right \\(x = ${fn(hi)}\\), left \\(x = ${fn(lo)}\\).`);
     const methodWord = method === 'washer' ? 'the disk/washer method' : 'the shell method';
     const raw = R.raw;
@@ -309,8 +388,10 @@
       statement: `${regionText(R)}. \\(R\\) is the base of a solid whose cross-sections perpendicular to the ${v}-axis are ${sh.desc}. Find the volume of the solid.`,
       steps, answer: I.ans, region: R, fac: sh.fQ.v * (sh.pi ? Math.PI : 1),
       solution: [`Slices perpendicular to the ${v}-axis have thickness \\(d${v}\\); ${v} runs from \\(${T(A.str())}\\) to \\(${T(B.str())}\\).`,
-        `$$s(${v}) = ${T(side.str(v))},\\qquad A(${v}) = ${sh.tex}$$`,
-        `$$V = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`],
+        ...boundsWork(hi, lo, A, B, v, perpY ? ['\\text{right}', '\\text{left}'] : ['\\text{top}', '\\text{bottom}']),
+        `$$s(${v}) = ${gpP(hi, v)} - ${gpP(lo, v)} = ${T(side.str(v))},\\qquad A(${v}) = ${sh.tex}$$`,
+        `Square the slice length, every term:`, `$$s^2 = ${mulGP(side, side, v)}$$`,
+        ...I.work],
       // Independent truth: integrate over x; for dy slices integrate the y-form side length numerically.
       truth: () => sh.fQ.v * (sh.pi ? Math.PI : 1) * (perpY ? Check.simpson(y => (F.right.num(y) - F.left.num(y)) ** 2, F.c.v, F.d.v, 20000) : Check.simpson(sq, raw.a, raw.b, 20000)),
     });
@@ -359,12 +440,15 @@
       { id: 'integrand', label: `Integrand: \\(A = \\int_a^b(\\;?\\;)\\,d${v}\\). Enter (${names[0]}) − (${names[1]}).`, kind: 'expr', v, lo: L, hi: H, ans: D.str(v),
         mistakes: [{ ans: top.str(v), msg: `You forgot to subtract the ${names[1]} curve.` }], signHint: `It's (${names[0]}) − (${names[1]}). Test a point between the bounds to see which curve is ${names[0] === 'top' ? 'higher' : 'farther right'}.`, hint: `(${names[0]} curve) − (${names[1]} curve), both in terms of ${v}.` },
     ];
-    const I = integralSteps({ G: D, v, a, b, what: 'Area \\(A\\)' });
+    const I = integralSteps({ G: D, v, a, b, what: 'Area \\(A\\)', sym: 'A' });
     steps.push(...I.steps);
     return finalize({
       statement, steps, answer: I.ans,
       solution: [`The curves meet at \\(${v} = ${T(a.str())}\\) and \\(${v} = ${T(b.str())}\\). ${names[0] === 'top' ? 'Top' : 'Right'} curve \\(${T(top.str(v))}\\), ${names[1]} curve \\(${T(bot.str(v))}\\).`,
-        `$$A = ${I.lines[0]}$$`, `$$${I.lines[1]}$$`],
+        ...boundsWork(top, bot, a, b, v, names.map(n => `\\text{${n}}`)),
+        `Subtract, distributing the minus sign to every term:`,
+        `$$(\\text{${names[0]}}) - (\\text{${names[1]}}) = ${eqs([`${gpP(top, v)} - ${gpP(bot, v)}`, jn([...top.t.map(t => termT(t.c, t.p, v)), ...bot.t.map(t => termT(t.c.neg(), t.p, v))]), gpT(D, v)])}$$`,
+        ...I.work],
       truth: () => Check.simpson(t => raw.top(t) - raw.bot(t), L, H, 20000),
     });
   }
@@ -389,7 +473,14 @@
       ];
       return finalize({ statement: `Find the area of the region between \\(y = \\sin x\\) and \\(y = \\cos x\\) on \\([0, ${wide ? '\\pi' : '\\tfrac{\\pi}{2}'}]\\).`, steps, answer: tot,
         solution: ['The curves cross where \\(\\tan x = 1\\), at \\(x = \\pi/4\\). Left of it cos is on top; right of it sin is on top.',
-          `$$A = \\int_0^{\\pi/4}(\\cos x - \\sin x)\\,dx + \\int_{\\pi/4}^{${wide ? '\\pi' : '\\pi/2'}}(\\sin x - \\cos x)\\,dx = (${T(A1)}) + (${T(A2)}) = ${T(tot)}$$`],
+          `$$A = \\int_0^{\\pi/4}(\\cos x - \\sin x)\\,dx + \\int_{\\pi/4}^{${wide ? '\\pi' : '\\pi/2'}}(\\sin x - \\cos x)\\,dx$$`,
+          'Values used: \\(\\sin 0 = 0,\\ \\cos 0 = 1,\\ \\sin\\frac{\\pi}{4} = \\cos\\frac{\\pi}{4} = \\frac{\\sqrt2}{2}\\), ' + (wide ? '\\(\\sin\\pi = 0,\\ \\cos\\pi = -1\\).' : '\\(\\sin\\frac{\\pi}{2} = 1,\\ \\cos\\frac{\\pi}{2} = 0\\).'),
+          '$$\\int(\\cos x - \\sin x)\\,dx = \\sin x - (-\\cos x) = \\sin x + \\cos x$$',
+          '$$\\Big[\\sin x + \\cos x\\Big]_0^{\\pi/4} = \\left(\\frac{\\sqrt2}{2} + \\frac{\\sqrt2}{2}\\right) - (0 + 1) = \\frac{2\\sqrt2}{2} - 1 = \\sqrt2 - 1$$',
+          '$$\\int(\\sin x - \\cos x)\\,dx = -\\cos x - \\sin x$$',
+          wide ? '$$\\Big[-\\cos x - \\sin x\\Big]_{\\pi/4}^{\\pi} = \\big(-(-1) - 0\\big) - \\left(-\\frac{\\sqrt2}{2} - \\frac{\\sqrt2}{2}\\right) = 1 - (-\\sqrt2) = 1 + \\sqrt2$$'
+            : '$$\\Big[-\\cos x - \\sin x\\Big]_{\\pi/4}^{\\pi/2} = (-0 - 1) - \\left(-\\frac{\\sqrt2}{2} - \\frac{\\sqrt2}{2}\\right) = -1 - (-\\sqrt2) = \\sqrt2 - 1$$',
+          `$$A = (${T(A1)}) + (${T(A2)}) = ${wide ? '\\sqrt2 - 1 + 1 + \\sqrt2 = 2\\sqrt2' : '\\sqrt2 - 1 + \\sqrt2 - 1 = 2\\sqrt2 - 2'} \\approx ${fmt(Check.evalNum(tot))}$$`],
         truth: () => Check.simpson(x => Math.abs(Math.sin(x) - Math.cos(x)), 0, Math.PI / 4, 4000) + Check.simpson(x => Math.abs(Math.sin(x) - Math.cos(x)), Math.PI / 4, wide ? Math.PI : Math.PI / 2, 4000) });
     }
     // y = x^2 vs a line crossing at c inside [a,b]; other root outside.
@@ -406,8 +497,12 @@
     ];
     return finalize({ statement: `Find the area of the region between \\(y = x^2\\) and \\(y = ${T(g.str('x'))}\\) on the interval \\([${a}, ${b}]\\).`, steps, answer: tot.str(),
       solution: [`Setting \\(x^2 = ${T(g.str('x'))}\\) gives \\(x = ${c}\\) and \\(x = ${e}\\); only \\(x = ${c}\\) is inside \\([${a},${b}]\\), so the curves switch there and the region must be split.`,
-        `On \\([${a},${c}]\\) the top curve is \\(${topL.replace(/^y = /, '')}\\): area \\(= ${T(A1.str())}\\). On \\([${c},${b}]\\) the other curve is on top: area \\(= ${T(A2.str())}\\).`,
-        `$$A = ${T(A1.str())} + ${T(A2.str())} = ${T(tot.str())}$$ (Integrating straight across would give ${T(net.str())}, which is wrong.)`],
+        `Subtract, every term: $$x^2 - \\left(${gpT(g, 'x')}\\right) = ${gpT(D, 'x')} = (x ${c < 0 ? '+ ' + -c : '- ' + c})(x ${e < 0 ? '+ ' + -e : '- ' + e})$$ Antiderivative, one term at a time: $$F(x) = ${antiLine(D, 'x')}$$`,
+        `Left piece \\([${a},${c}]\\):`, `$$${evalAt(left, c)}$$`, `$$${evalAt(left, a)}$$`, `$$${diffLine(left.at(c), left.at(a), c, a)}$$`,
+        `${I1.v < 0 ? 'Negative, so the line is on top here; the area is its absolute value' : 'Positive, so \\(x^2\\) is on top here'}: \\(A_1 = ${T(A1.str())}\\).`,
+        `Right piece \\([${c},${b}]\\):`, `$$${evalAt(left, b)}$$`, `$$${diffLine(left.at(b), left.at(c), b, c)}$$`,
+        `${I2.v < 0 ? 'Negative, so the line is on top here; the area is its absolute value' : 'Positive, so \\(x^2\\) is on top here'}: \\(A_2 = ${T(A2.str())}\\).`,
+        `$$A = A_1 + A_2 = ${eqs(sumStages([A1, A2]))}$$ (Integrating straight across would give \\(${T(net.str())}\\), which is wrong.)`],
       truth: () => Check.simpson(x => Math.abs(x * x - g.num(x)), a, c, 4000) + Check.simpson(x => Math.abs(x * x - g.num(x)), c, b, 4000) });
   }
 
@@ -423,7 +518,10 @@
         { id: 'final', label: `\\(s(${T(Tn)})\\)`, kind: 'num', ans: `${s0 + A} - ${A} cos(${Tn})`, hint: 'Plug the time into your s(t).' },
       ];
       return finalize({ statement: `An object moves along a line with velocity \\(v(t) = ${A}\\sin t\\) and initial position \\(s(0) = ${s0}\\). Find its position function \\(s(t)\\) and its position at \\(t = ${T(Tn)}\\).`, steps, answer: steps[1].ans,
-        solution: [`$$s(t) = \\int ${A}\\sin t\\,dt = -${A}\\cos t + C,\\quad s(0) = -${A} + C = ${s0} \\Rightarrow C = ${s0 + A}$$`, `$$s(t) = ${T(sExpr)},\\qquad s(${T(Tn)}) = ${T(steps[1].ans)} = ${fmt(Check.evalNum(steps[1].ans))}$$`],
+        solution: [`$$s(t) = \\int ${A}\\sin t\\,dt = ${A}\\cdot(-\\cos t) + C = -${A}\\cos t + C$$`,
+          `Use \\(s(0) = ${s0}\\) and \\(\\cos 0 = 1\\): $$s(0) = -${A}\\cdot 1 + C = -${A} + C = ${s0} \\;\\Rightarrow\\; C = ${s0} + ${A} = ${s0 + A}$$`,
+          `$$s(t) = ${T(sExpr)}$$`,
+          (() => { const cv = { 'pi/2': 0, 'pi': -1, '3 pi/2': 0 }[Tn], val = s0 + A - A * cv; return `Use \\(\\cos ${T(Tn)} = ${cv}\\): $$s(${T(Tn)}) = ${s0 + A} - ${A}\\cdot ${cv < 0 ? '(' + cv + ')' : cv} = ${s0 + A} - ${A * cv < 0 ? '(' + A * cv + ')' : A * cv} = ${val}$$`; })()],
         meta: { T: Check.evalNum(Tn), s0 }, truth: () => s0 + Check.simpson(t => A * Math.sin(t), 0, Check.evalNum(Tn), 2000) });
     }
     const v = GP.poly(...(r.bool() ? [r.pick([3, 6]), r.int(-6, 6), r.int(-5, 5)] : [r.int(1, 6), r.int(-8, 8)]));
@@ -437,7 +535,9 @@
         mistakes: [...(s0 ? [{ ans: S.at(Tn).sub(s0).str(), msg: `That is the displacement. Position = s(0) + displacement = ${s0} + that.` }] : [])], hint: 'Plug t into s(t).' },
     ];
     return finalize({ statement: `An object moves along a line with velocity \\(v(t) = ${T(v.str('t'))}\\) (m/s) for \\(t \\ge 0\\), and \\(s(0) = ${s0}\\). Find the position function and the position at \\(t = ${Tn}\\).`, steps, answer: S.at(Tn).str(),
-      solution: [`$$s(t) = s(0) + \\int_0^t v(x)\\,dx = ${s0} + ${T(v.integ().str('t'))} = ${T(S.str('t'))}$$`, `$$s(${Tn}) = ${T(S.at(Tn).str())}\\ \\text{m}$$`],
+      solution: [`Antiderivative of \\(v\\), one term at a time: $$${antiLine(v, 't')}$$`,
+        `Add the constant so that \\(s(0) = ${s0}\\) (every \\(t\\) term is 0 at \\(t = 0\\), so \\(C = ${s0}\\)):`,
+        `$$s(t) = ${T(v.integ().str('t'))} ${s0 < 0 ? '- ' + -s0 : '+ ' + s0} = ${T(S.str('t'))}$$`, `$$${evalAt(S, Tn, 's')}\\ \\text{m}$$`],
       meta: { T: Tn, s0 }, truth: () => s0 + Check.simpson(t => v.num(t), 0, Tn, 400) });
   }
   function posFromA(r) {
@@ -451,7 +551,10 @@
       { id: 'final', label: `Position at \\(t = ${Tn}\\)`, kind: 'num', ans: S.at(Tn).str(), hint: 'Plug t into s(t).' },
     ];
     return finalize({ statement: `An object has acceleration \\(a(t) = ${T(aQ.str('t'))}\\) (m/s²), initial velocity \\(v(0) = ${v0}\\) and initial position \\(s(0) = ${s0}\\). Find \\(v(t)\\), \\(s(t)\\), and the position at \\(t = ${Tn}\\).`, steps, answer: S.at(Tn).str(),
-      solution: [`$$v(t) = ${v0} + \\int_0^t a = ${T(V.str('t'))}$$`, `$$s(t) = ${s0} + \\int_0^t v = ${T(S.str('t'))}$$`, `$$s(${Tn}) = ${T(S.at(Tn).str())}$$`],
+      solution: [`Velocity: antiderivative of \\(a\\), one term at a time: $$${antiLine(aQ, 't')}$$`,
+        `Every \\(t\\) term is 0 at \\(t = 0\\), so the constant is \\(v(0) = ${v0}\\): $$v(t) = ${T(V.str('t'))}$$`,
+        `Position: antiderivative of \\(v\\), one term at a time: $$${antiLine(V, 't')}$$`,
+        `The constant is \\(s(0) = ${s0}\\): $$s(t) = ${T(S.str('t'))}$$`, `$$${evalAt(S, Tn, 's')}\\ \\text{m}$$`],
       meta: { T: Tn, s0 }, truth: () => { let s = s0, vv = v0; const n = 20000, h = Tn / n; for (let i = 0; i < n; i++) { const t = i * h; const k1 = a.num(t), k2 = a.num(t + h / 2); s += h * (vv + h / 2 * k1); vv += h * k2; } return s; } });
   }
   function dispDist(r) {
@@ -463,7 +566,10 @@
         { id: 'final', label: 'Distance traveled on \\([0,\\pi]\\)', kind: 'num', ans: `${2 * A}`, mistakes: [{ ans: '0', msg: 'That is the displacement. Distance integrates |v|: split at t = π/2 and add the absolute values.' }], hint: 'Split at the sign change; add |each piece|.' },
       ];
       return finalize({ statement: `An object moves with velocity \\(v(t) = ${A === 1 ? '' : A}\\cos t\\) on \\([0, \\pi]\\). Find the displacement and the total distance traveled.`, steps, answer: `${2 * A}`,
-        solution: [`$$\\text{displacement} = \\int_0^\\pi ${A === 1 ? '' : A}\\cos t\\,dt = 0$$`, `$$\\text{distance} = \\int_0^{\\pi/2} ${A === 1 ? '' : A}\\cos t\\,dt - \\int_{\\pi/2}^{\\pi} ${A === 1 ? '' : A}\\cos t\\,dt = ${A} + ${A} = ${2 * A}$$`],
+        solution: [`\\(\\cos t = 0\\) at \\(t = \\frac{\\pi}{2}\\): \\(v > 0\\) before it, \\(v < 0\\) after it. Antiderivative: \\(\\int ${A === 1 ? '' : A}\\cos t\\,dt = ${A === 1 ? '' : A}\\sin t\\). Values: \\(\\sin 0 = 0,\\ \\sin\\frac{\\pi}{2} = 1,\\ \\sin\\pi = 0\\).`,
+          `$$\\text{displacement} = \\Big[${A === 1 ? '' : A}\\sin t\\Big]_0^{\\pi} = ${A}\\cdot 0 - ${A}\\cdot 0 = 0$$`,
+          `$$\\int_0^{\\pi/2} ${A === 1 ? '' : A}\\cos t\\,dt = ${A}\\cdot 1 - ${A}\\cdot 0 = ${A},\\qquad \\int_{\\pi/2}^{\\pi} ${A === 1 ? '' : A}\\cos t\\,dt = ${A}\\cdot 0 - ${A}\\cdot 1 = -${A}$$`,
+          `$$\\text{distance} = |${A}| + |-${A}| = ${A} + ${A} = ${2 * A}$$`],
         truth: () => Check.simpson(t => Math.abs(A * Math.cos(t)), 0, Math.PI / 2, 2000) + Check.simpson(t => Math.abs(A * Math.cos(t)), Math.PI / 2, Math.PI, 2000) });
     }
     const two = r.bool();
@@ -479,9 +585,12 @@
     steps.push({ id: 'final', label: `Total distance traveled on \\([0, ${Tn}]\\)`, kind: 'num', ans: dist.str(), mistakes: [{ ans: disp.str(), msg: 'That is the displacement. Distance = ∫|v| dt: split where v = 0 and add the absolute value of each piece.' }, { ans: (disp.v < 0 ? disp.neg() : disp).str(), msg: '|displacement| is not distance: backward motion cancels forward motion in it. Split at each zero of v and add |each piece|.' }], hint: 'Split at the zeros of v; add the absolute value of each piece.' });
     return finalize({ statement: `An object moves along a line with velocity \\(v(t) = ${T(v.str('t'))}\\) (m/s). Find the displacement and the total distance traveled on \\([0, ${Tn}]\\).`, steps, answer: dist.str(),
       solution: [`\\(v(t) = ${c === 1 ? '' : c === -1 ? '-' : c}(t - ${r1})(t ${r2 < 0 ? '+ ' + -r2 : '- ' + r2})\\) is zero at \\(t = ${roots.join(', ')}\\) inside the interval, so the motion changes direction there.`,
-        `$$\\text{displacement} = \\int_0^{${Tn}} v\\,dt = ${T(disp.str())}\\ \\text{m}$$`,
-        `Pieces: ${pieces.map((p, i) => `\\(\\int_{${pts[i]}}^{${pts[i + 1]}} v\\,dt = ${T(p.str())}\\)`).join(', ')}.`,
-        `$$\\text{distance} = \\int_0^{${Tn}} |v|\\,dt = ${pieces.map(p => `\\left|${T(p.str())}\\right|`).join(' + ')} = ${T(dist.str())}\\ \\text{m}$$`],
+        `Check the factoring by multiplying out: $$${mulGP(GP.poly(1, -r1), GP.poly(1, -r2), 't')}$$${c === 1 ? '' : `$$${c}\\cdot\\left(${gpT(GP.poly(1, -(r1 + r2), r1 * r2), 't')}\\right) = ${gpT(v, 't')} = v(t)$$`}`,
+        `Antiderivative of \\(v\\), one term at a time: $$F(t) = ${antiLine(v, 't')}$$`,
+        `F at every split point:`, ...[...new Set(pts)].map(x => `$$${evalAt(F, x)}$$`),
+        `Displacement keeps signs, straight from 0 to ${Tn}:`, `$$\\text{displacement} = ${diffLine(F.at(Tn), F.at(0), Tn, 0)}\\ \\text{m}$$`,
+        `Distance: one piece between each pair of split points.`, ...pieces.map((p, i) => `$$\\int_{${pts[i]}}^{${pts[i + 1]}} v\\,dt = ${diffLine(F.at(pts[i + 1]), F.at(pts[i]), pts[i + 1], pts[i])}$$`),
+        `$$\\text{distance} = ${pieces.map(p => `\\left|${tq(p)}\\right|`).join(' + ')} = ${eqs(sumStages(pieces.map(p => p.v < 0 ? p.neg() : p)))}\\ \\text{m}$$`],
       truth: () => { let d = 0; const n = 60000, h = Tn / n; for (let i = 1; i <= n; i++) { const t = i * h; d += Math.abs(Check.simpson(x => v.num(x), (i - 1) * h, t, 2)); } return d; } });
   }
 
@@ -491,7 +600,7 @@
     const kind = r.pick(v === 'x' ? ['p32', 'p32', 'sq1', 'sq2', 'sq3', 'cosh', 'line', 'lnsq'] : ['p32', 'sq1', 'sq3']);
     const w = v === 'x' ? 'y' : 'x';
     const d = `d${v}`;
-    let fE, dE, oneE, integrand, F, A, B, ansS, lines, mistakesInt = [], antiE, truthF;
+    let fE, dE, oneE, integrand, F, A, B, ansS, work, mistakesInt = [], antiE, truthF;
     if (kind === 'p32') {
       const m = r.pick([1, 4, 8, 9, 2, 3, 12]);
       const [so, si] = sqrtSimp(m);
@@ -512,14 +621,27 @@
       ansS = `2 / ${3 * m} * (${p(U2)} - ${p(U1)})`;
       try { ansS = powQ(U2, new Q(3, 2)).sub(powQ(U1, new Q(3, 2))).mul(new Q(2, 3 * m)).str(); } catch (e) { }
       mistakesInt = [{ ans: `sqrt(1 + ${dE})`, msg: "Square f' before adding 1: √(1 + (f')²)." }, { ans: `sqrt(${m} ${v})`, msg: "You lost the 1: it's √(1 + (f')²)." }];
-      lines = [`u = ${T(oneE)},\\ du = ${m}\\,${d}:\\quad L = \\frac{1}{${m}}\\int_{${T(U1.str())}}^{${T(U2.str())}} u^{1/2}\\,du = \\frac{2}{${3 * m}}\\Big[u^{3/2}\\Big]_{${T(U1.str())}}^{${T(U2.str())}} = ${T(ansS)}`];
+      const sqT = T(sq), p32 = u => { try { const r = powQ(u, new Q(1, 2)); return `(\\sqrt{${tq(u)}})^3 = ${tqp(r)}^3 = ${tq(powQ(u, new Q(3, 2)))}`; } catch (e) { return `${tqp(u)}^{3/2}`; } };
+      work = [`The constant ${shift ? `\\(${shift}\\)` : ''} drops out; power rule on the \\(${v}^{3/2}\\) term:`,
+        `$$${w}' = \\frac{2${sq === '1' ? '' : sqT}}{3}\\cdot\\frac{3}{2}\\,${v}^{1/2} = ${sq === '1' ? '' : sqT}\\sqrt{${v}}$$`,
+        `$$(${w}')^2 = ${sq === '1' ? '' : `(${sqT})^2`}(\\sqrt{${v}})^2 = ${m === 1 ? '' : m}${v},\\qquad 1 + (${w}')^2 = ${T(oneE)}$$`,
+        `$$L = \\int_{${tq(A)}}^{${tq(B)}} \\sqrt{${T(oneE)}}\\,${d}$$`,
+        `Substitute \\(u = ${T(oneE)}\\), \\(du = ${m}\\,${d}\\), so \\(${d} = \\frac{du}{${m}}\\). New bounds:`,
+        `$$${[A, B].map(x => `u(${tq(x)}) = ${eqs([`1 + ${m}\\cdot ${tqp(x)}`, ...sumStages([q(1), x.mul(m)])])}`).join(',\\qquad ')}$$`,
+        `$$L = \\frac{1}{${m}}\\int_{${tq(U1)}}^{${tq(U2)}} u^{1/2}\\,du = \\frac{1}{${m}}\\cdot\\frac{2}{3}\\Big[u^{3/2}\\Big]_{${tq(U1)}}^{${tq(U2)}} = \\frac{2}{${3 * m}}\\Big[u^{3/2}\\Big]_{${tq(U1)}}^{${tq(U2)}}$$`,
+        `$$${tqp(U2)}^{3/2} = ${p32(U2)},\\qquad ${tqp(U1)}^{3/2} = ${p32(U1)}$$`,
+        (() => { try { const a3 = powQ(U2, new Q(3, 2)), b3 = powQ(U1, new Q(3, 2)), df = a3.sub(b3); return `$$L = \\frac{2}{${3 * m}}\\left(${tq(a3)} - ${tqp(b3)}\\right) = \\frac{2}{${3 * m}}\\cdot ${tqp(df)} = ${eqs(mulStages(new Q(2, 3 * m), df))}$$`; } catch (e) { return `$$L = ${T(ansS)}$$`; } })()];
       truthF = t => (2 * Math.sqrt(m) / 3) * Math.pow(t, 1.5) + shift;
     } else if (kind === 'line') {
       const m = r.pick([2, -3, 1, 3, -2, 4]), c0 = r.int(-3, 4);
       A = q(r.int(-3, 1)); B = A.add(r.int(2, 5));
       fE = `${m} ${v}${c0 ? (c0 > 0 ? ' + ' + c0 : ' - ' + -c0) : ''}`; dE = `${m}`; oneE = `${1 + m * m}`; integrand = `sqrt(${1 + m * m})`; antiE = `sqrt(${1 + m * m}) ${v}`;
       ansS = `${B.sub(A).str()} sqrt(${1 + m * m})`;
-      lines = [`L = \\sqrt{${1 + m * m}}\\,(${B.str()} - (${A.str()})) = ${T(ansS)}.\\ \\text{Check with the distance formula: } \\sqrt{(\\Delta ${v})^2 + (\\Delta ${w})^2} = \\sqrt{${B.sub(A).str()}^2 + ${B.sub(A).mul(Math.abs(m)).str()}^2}\\ \\checkmark`];
+      const dl = B.sub(A).v, rise = dl * Math.abs(m);
+      work = [`$$${w}' = ${m},\\qquad (${w}')^2 = ${m < 0 ? `(${m})` : m}^2 = ${m * m},\\qquad 1 + (${w}')^2 = 1 + ${m * m} = ${1 + m * m}$$`,
+        `The integrand \\(\\sqrt{${1 + m * m}}\\) is a constant, so its antiderivative is \\(\\sqrt{${1 + m * m}}\\,${v}\\):`,
+        `$$L = \\int_{${tq(A)}}^{${tq(B)}} \\sqrt{${1 + m * m}}\\,${d} = \\sqrt{${1 + m * m}}\\,\\big(${tq(B)} - ${tqp(A)}\\big) = \\sqrt{${1 + m * m}}\\cdot ${dl} = ${T(ansS)}$$`,
+        `Check with the distance formula: run \\(${dl}\\), rise \\(${dl}\\cdot ${Math.abs(m)} = ${rise}\\): $$\\sqrt{${dl}^2 + ${rise}^2} = \\sqrt{${dl * dl} + ${rise * rise}} = \\sqrt{${dl * dl + rise * rise}} = ${T(ansS)}\\ \\checkmark$$`];
       mistakesInt = [{ ans: `sqrt(${1 + Math.abs(m)})`, msg: "Square the slope: 1 + m², not 1 + m." }];
       truthF = t => m * t + c0;
     } else if (kind === 'cosh') {
@@ -529,13 +651,25 @@
       A = { str: () => bnd(lo), v: Check.evalNum(bnd(lo)) }; B = { str: () => bnd(hi), v: Check.evalNum(bnd(hi)) };
       fE = `(e^${v} + e^(-${v})) / 2`; dE = `(e^${v} - e^(-${v})) / 2`; oneE = `1 + ((e^${v} - e^(-${v})) / 2)^2`; integrand = `(e^${v} + e^(-${v})) / 2`; antiE = `(e^${v} - e^(-${v})) / 2`;
       ansS = val(hi).sub(val(lo)).str();
-      lines = [`1 + \\left(\\tfrac{e^${v} - e^{-${v}}}{2}\\right)^2 = \\left(\\tfrac{e^${v} + e^{-${v}}}{2}\\right)^2,\\ \\text{so}\\ L = \\Big[\\tfrac{e^${v} - e^{-${v}}}{2}\\Big]_{${T(A.str())}}^{${T(B.str())}} = ${T(ansS)}`];
+      const at = n => { if (n === 0) return `F(0) = \\frac{e^0 - e^0}{2} = \\frac{1 - 1}{2} = 0`; const k = Math.abs(n) + 1, s = n > 0 ? '' : '-', [p, m2] = n > 0 ? [`${k}`, `\\frac{1}{${k}}`] : [`\\frac{1}{${k}}`, `${k}`];
+        return `F(${s}\\ln ${k}) = \\frac{e^{${s}\\ln ${k}} - e^{${n > 0 ? '-' : ''}\\ln ${k}}}{2} = \\frac{${p} - ${m2}}{2} = \\frac{${tq(n > 0 ? new Q(k * k - 1, k) : new Q(1 - k * k, k))}}{2} = ${tq(val(n))}`; };
+      work = [`$$${w}' = \\frac{e^${v} - e^{-${v}}}{2},\\qquad (${w}')^2 = \\frac{e^{2${v}} - 2e^${v}e^{-${v}} + e^{-2${v}}}{4} = \\frac{e^{2${v}} - 2 + e^{-2${v}}}{4}$$`,
+        `$$1 + (${w}')^2 = \\frac{4 + e^{2${v}} - 2 + e^{-2${v}}}{4} = \\frac{e^{2${v}} + 2 + e^{-2${v}}}{4} = \\left(\\frac{e^${v} + e^{-${v}}}{2}\\right)^2$$`,
+        `So the square root is \\(\\frac{e^${v} + e^{-${v}}}{2}\\), with antiderivative \\(F(${v}) = \\frac{e^${v} - e^{-${v}}}{2}\\). Use \\(e^{\\ln k} = k\\) and \\(e^{-\\ln k} = \\frac1k\\):`,
+        `$$${at(hi)}$$`, `$$${at(lo)}$$`,
+        `$$L = ${eqs([`${tq(val(hi))} - ${tqp(val(lo))}`, ...sumStages([val(hi), val(lo).neg()])])}$$`];
       truthF = t => (Math.exp(t) + Math.exp(-t)) / 2;
     } else if (kind === 'lnsq') {
       A = q(1); const bb = r.pick([2, 3, 4, 'e']); B = bb === 'e' ? { str: () => 'e', v: Math.E } : q(bb);
       fE = `${v}^2 / 4 - ln(${v}) / 2`; dE = `${v} / 2 - 1 / (2 ${v})`; oneE = `1 + (${v} / 2 - 1 / (2 ${v}))^2`; integrand = `${v} / 2 + 1 / (2 ${v})`; antiE = `${v}^2 / 4 + ln(${v}) / 2`;
       ansS = bb === 'e' ? '(e^2 + 1) / 4' : `${new Q(bb * bb - 1, 4).str()} + ln(${bb}) / 2`;
-      lines = [`1 + (f')^2 = \\left(\\tfrac{${v}}{2} + \\tfrac{1}{2${v}}\\right)^2,\\ L = \\Big[\\tfrac{${v}^2}{4} + \\tfrac{\\ln ${v}}{2}\\Big]_{1}^{${bb}} = ${T(ansS)}`];
+      work = [`$$${w}' = \\frac{2${v}}{4} - \\frac{1}{2}\\cdot\\frac{1}{${v}} = \\frac{${v}}{2} - \\frac{1}{2${v}}$$`,
+        `$$(${w}')^2 = \\frac{${v}^2}{4} - 2\\cdot\\frac{${v}}{2}\\cdot\\frac{1}{2${v}} + \\frac{1}{4${v}^2} = \\frac{${v}^2}{4} - \\frac{1}{2} + \\frac{1}{4${v}^2}$$`,
+        `$$1 + (${w}')^2 = \\frac{${v}^2}{4} + \\frac{1}{2} + \\frac{1}{4${v}^2} = \\left(\\frac{${v}}{2} + \\frac{1}{2${v}}\\right)^2$$`,
+        `So the integrand is \\(\\frac{${v}}{2} + \\frac{1}{2${v}}\\), with antiderivative \\(F(${v}) = \\frac{${v}^2}{4} + \\frac{\\ln ${v}}{2}\\) (\\(\\ln 1 = 0\\)${bb === 'e' ? ', \\(\\ln e = 1\\)' : ''}):`,
+        `$$F(${bb}) = \\frac{${bb}^2}{4} + \\frac{\\ln ${bb}}{2}${bb === 'e' ? ' = \\frac{e^2}{4} + \\frac{1}{2}' : ` = \\frac{${bb * bb}}{4} + \\frac{\\ln ${bb}}{2}`},\\qquad F(1) = \\frac{1^2}{4} + \\frac{\\ln 1}{2} = \\frac{1}{4} + 0 = \\frac{1}{4}$$`,
+        bb === 'e' ? `$$L = \\frac{e^2}{4} + \\frac{1}{2} - \\frac{1}{4} = \\frac{e^2}{4} + \\frac{2}{4} - \\frac{1}{4} = \\frac{e^2}{4} + \\frac{1}{4} = \\frac{e^2 + 1}{4}$$`
+          : `$$L = \\frac{${bb * bb}}{4} - \\frac{1}{4} + \\frac{\\ln ${bb}}{2} = \\frac{${bb * bb} - 1}{4} + \\frac{\\ln ${bb}}{2} = ${T(ansS)}$$`];
       truthF = t => t * t / 4 - Math.log(t) / 2;
     } else { // perfect-square families: f' = P - N with 4PN = 1, integrand P + N
       const fam = { sq1: [GP.x(3, new Q(1, 6)), GP.x(-1, new Q(1, 2))], sq2: [GP.x(4, new Q(1, 8)), GP.x(-2, new Q(1, 4))], sq3: [GP.x(3, new Q(1, 3)), GP.x(-1, new Q(1, 4))] }[kind];
@@ -545,7 +679,13 @@
       A = q(r.int(1, 2)); B = A.add(r.int(1, 2));
       fE = f.str(v); dE = fp.str(v); oneE = `1 + (${fp.str(v)})^2`; integrand = G.str(v); antiE = G.integ().str(v);
       ansS = G.integ().at(B).sub(G.integ().at(A)).str();
-      lines = [`1 + (f')^2 = \\left(${T(G.str(v))}\\right)^2 \\text{ (perfect square)},\\ L = \\int_{${A.str()}}^{${B.str()}} \\left(${T(G.str(v))}\\right) ${d} = \\Big[${T(G.integ().str(v))}\\Big]_{${A.str()}}^{${B.str()}} = ${T(ansS)}`];
+      const Fi = G.integ(), sq1 = GP.k(1).add(fp.sq());
+      work = [`Derivative, one term at a time: $$${w}' = ${derivLine(f, v)}$$`,
+        `Square it, every term: $$(${w}')^2 = ${mulGP(fp, fp, v)}$$`,
+        `$$1 + (${w}')^2 = ${eqs([`1 + ${gpP(fp.sq(), v)}`, gpT(sq1, v)])}$$`,
+        `That is a perfect square (only the middle sign flips): $$${mulGP(G, G, v)}\\ \\checkmark$$ so \\(\\sqrt{1 + (${w}')^2} = ${gpT(G, v)}\\).`,
+        `Antiderivative, one term at a time: $$F(${v}) = ${antiLine(G, v)}$$`,
+        `$$${evalAt(Fi, B)}$$`, `$$${evalAt(Fi, A)}$$`, `$$L = ${diffLine(Fi.at(B), Fi.at(A), B, A)}$$`];
       mistakesInt = [{ ans: `sqrt(1 + ${fp.str(v)})`, msg: "Square f' before adding 1." }, { ans: fp.str(v), msg: "1 + (f')² is a perfect square of the SUM: (P + N)², not the difference. The √ gives P + N." }];
       truthF = t => f.num(t);
     }
@@ -561,22 +701,22 @@
     return finalize({
       statement: `Find the length of the curve \\(${lead}\\) on \\([${T(A.str())}, ${T(B.str())}]\\)${v === 'y' ? ' (here \\(x\\) is a function of \\(y\\): integrate \\(dy\\))' : ''}.`,
       steps, answer: ansS,
-      solution: [`$$${w}' = ${T(dE)},\\qquad 1 + (${w}')^2 = ${T(oneE)}$$`, `$$L = \\int_{${T(A.str())}}^{${T(B.str())}} ${Check.tex(integrand)}\\,${d}$$`, `$$${lines[0]} \\approx ${fmt(Check.evalNum(ansS))}$$`],
+      solution: [...work, `$$L = ${T(ansS)} \\approx ${fmt(Check.evalNum(ansS))}$$`],
       truth: () => { let s = 0; const n = 200000, h = (hi - lo) / n; let py = truthF(lo); for (let i = 1; i <= n; i++) { const t = lo + i * h, yv = truthF(t); s += Math.hypot(h, yv - py); py = yv; } return s; },
       curve: truthF, fE, dE, oneE, integrandE: integrand, v,
     });
   }
   function arcSetup(r) {
     const opts = [
-      { f: 'x^3 + 2', d: '3 x^2', i: 'sqrt(1 + 9 x^4)', a: -2, b: 5, g: x => x ** 3 + 2 },
-      { f: '2 cos(3 x)', d: '-6 sin(3 x)', i: 'sqrt(1 + 36 sin(3 x)^2)', a: '-pi', b: 'pi', g: x => 2 * Math.cos(3 * x) },
-      { f: 'e^(-2 x)', d: '-2 e^(-2 x)', i: 'sqrt(1 + 4 e^(-4 x))', a: 0, b: 2, g: x => Math.exp(-2 * x) },
-      { f: 'ln(x)', d: '1 / x', i: 'sqrt(1 + 1 / x^2)', a: 1, b: 10, g: Math.log },
-      { f: 'x^2', d: '2 x', i: 'sqrt(1 + 4 x^2)', a: 0, b: r.int(1, 3), g: x => x * x },
-      { f: 'sin(x)', d: 'cos(x)', i: 'sqrt(1 + cos(x)^2)', a: 0, b: 'pi', g: Math.sin },
-      (k => ({ f: `${k} x^2 - 1`, d: `${2 * k} x`, i: `sqrt(1 + ${4 * k * k} x^2)`, a: 0, b: 1, g: x => k * x * x - 1 }))(r.int(2, 4)),
-      { f: 'tan(x)', d: 'sec(x)^2', i: 'sqrt(1 + sec(x)^4)', a: 0, b: 'pi/4', g: Math.tan },
-      { f: '1 / x', d: '-1 / x^2', i: 'sqrt(1 + 1 / x^4)', a: 1, b: r.int(2, 5), g: x => 1 / x },
+      { f: 'x^3 + 2', d: '3 x^2', s: '9 x^4', i: 'sqrt(1 + 9 x^4)', a: -2, b: 5, g: x => x ** 3 + 2 },
+      { f: '2 cos(3 x)', d: '-6 sin(3 x)', s: '36 sin(3 x)^2', i: 'sqrt(1 + 36 sin(3 x)^2)', a: '-pi', b: 'pi', g: x => 2 * Math.cos(3 * x) },
+      { f: 'e^(-2 x)', d: '-2 e^(-2 x)', s: '4 e^(-4 x)', i: 'sqrt(1 + 4 e^(-4 x))', a: 0, b: 2, g: x => Math.exp(-2 * x) },
+      { f: 'ln(x)', d: '1 / x', s: '1 / x^2', i: 'sqrt(1 + 1 / x^2)', a: 1, b: 10, g: Math.log },
+      { f: 'x^2', d: '2 x', s: '4 x^2', i: 'sqrt(1 + 4 x^2)', a: 0, b: r.int(1, 3), g: x => x * x },
+      { f: 'sin(x)', d: 'cos(x)', s: 'cos(x)^2', i: 'sqrt(1 + cos(x)^2)', a: 0, b: 'pi', g: Math.sin },
+      (k => ({ f: `${k} x^2 - 1`, d: `${2 * k} x`, s: `${4 * k * k} x^2`, i: `sqrt(1 + ${4 * k * k} x^2)`, a: 0, b: 1, g: x => k * x * x - 1 }))(r.int(2, 4)),
+      { f: 'tan(x)', d: 'sec(x)^2', s: 'sec(x)^4', i: 'sqrt(1 + sec(x)^4)', a: 0, b: 'pi/4', g: Math.tan },
+      { f: '1 / x', d: '-1 / x^2', s: '1 / x^4', i: 'sqrt(1 + 1 / x^4)', a: 1, b: r.int(2, 5), g: x => 1 / x },
     ];
     const o = r.pick(opts);
     const a = Check.evalNum(`${o.a}`), b = Check.evalNum(`${o.b}`);
@@ -586,7 +726,9 @@
       { id: 'a', label: 'Lower limit', kind: 'num', ans: `${o.a}` }, { id: 'b', label: 'Upper limit', kind: 'num', ans: `${o.b}` },
     ];
     return finalize({ statement: `Write and simplify, but do not evaluate, an integral with respect to \\(x\\) that gives the length of \\(y = ${T(o.f)}\\) on \\([${T(String(o.a))}, ${T(String(o.b))}]\\).`, steps, answer: null,
-      solution: [`$$f'(x) = ${T(o.d)},\\qquad L = \\int_{${T(String(o.a))}}^{${T(String(o.b))}} ${T(o.i)}\\,dx$$`, `(Numerically \\(L \\approx ${fmt(Check.simpson(x => Check.evalNum(o.i, { x }), a, b, 4000))}\\) with a calculator; not needed here.)`],
+      solution: [(() => { const k = o.f.match(/^(\d+) x\^2 - 1$/); const w = { 'x^3 + 2': ['3x^2 + 0', '3^2(x^2)^2'], '2 cos(3 x)': ['2\\cdot(-\\sin 3x)\\cdot 3', '(-6)^2\\sin^2 3x'], 'e^(-2 x)': ['e^{-2x}\\cdot(-2)', '(-2)^2(e^{-2x})^2'], 'ln(x)': ['\\frac{1}{x}', '\\frac{1^2}{x^2}'], 'x^2': ['2x', '2^2x^2'], 'sin(x)': ['\\cos x', '\\cos^2 x'], 'tan(x)': ['\\sec^2 x', '(\\sec^2 x)^2'], '1 / x': ['(x^{-1})\' = -1\\cdot x^{-2}', '(-1)^2(x^{-2})^2'] }[o.f] || [`${k[1]}\\cdot 2x`, `${2 * k[1]}^2x^2`];
+          return `Derivative (chain rule where needed), then square it: $$f'(x) = ${w[0]} = ${T(o.d)},\\qquad (f')^2 = ${w[1]} = ${T(o.s)}$$`; })(),
+        `$$L = \\int_{${T(String(o.a))}}^{${T(String(o.b))}} \\sqrt{1 + (f')^2}\\,dx = \\int_{${T(String(o.a))}}^{${T(String(o.b))}} ${T(o.i)}\\,dx$$`,`(Numerically \\(L \\approx ${fmt(Check.simpson(x => Check.evalNum(o.i, { x }), a, b, 4000))}\\) with a calculator; not needed here.)`],
       setupOnly: { integrand: o.i, a, b, g: o.g, f: o.f, d: o.d } });
   }
 
@@ -602,7 +744,7 @@
       statement = `A force of ${Fn} N is required to hold a spring stretched ${dcm} cm beyond its natural length. How much work is required to stretch it from ${ac} cm to ${bc} cm beyond its natural length?`;
       kMistakes = [{ ans: new Q(Fn, dcm).str(), msg: 'Convert cm to m first: k = F/x with x in meters.' }];
       bMistakes = [{ ans: `${bc}`, msg: 'Use meters: 1 cm = 0.01 m.' }]; aMistakes = [{ ans: `${ac}`, msg: 'Use meters.' }];
-      kSol = `F = kx:\\ ${Fn} = k(${new Q(dcm, 100).str()}) \\Rightarrow k = ${T(k.str())}\\ \\text{N/m}`;
+      kSol = [`Convert to meters: \\(${dcm}\\text{ cm} = ${dcm} \\div 100 = ${dn(new Q(dcm, 100))}\\text{ m}\\).`, `$$F = kx:\\quad ${Fn} = k\\cdot ${dn(new Q(dcm, 100))} \\;\\Rightarrow\\; k = \\frac{${Fn}}{${dn(new Q(dcm, 100))}} = ${dn(k)}\\ \\text{N/m}$$`, `Limits in meters: \\(${ac} \\div 100 = ${dn(a)}\\), \\(${bc} \\div 100 = ${dn(b)}\\).`];
     } else if (kind === 'lengths') {
       const L0 = r.pick([10, 12, 20, 25, 30]), L1 = L0 + r.pick([2, 4, 5, 10]), Fn = r.pick([20, 25, 30, 40, 50]);
       const L2 = L0 + r.pick([0, 2, 5]), L3 = L2 + r.pick([3, 5, 10]);
@@ -611,7 +753,7 @@
       kMistakes = [{ ans: new Q(Fn * 100, L1).str(), msg: `x is the stretch beyond natural length: ${L1} − ${L0} = ${L1 - L0} cm, not ${L1} cm.` }, { ans: new Q(Fn, L1 - L0).str(), msg: 'Convert cm to m first.' }];
       aMistakes = [{ ans: new Q(L2, 100).str(), msg: `x is measured from the natural length: ${L2} − ${L0} = ${L2 - L0} cm.` }];
       bMistakes = [{ ans: new Q(L3, 100).str(), msg: `x is measured from the natural length: ${L3} − ${L0} = ${L3 - L0} cm = ${(L3 - L0) / 100} m.` }, { ans: `${L3 - L0}`, msg: 'Use meters: 1 cm = 0.01 m.' }];
-      kSol = `x = \\text{stretch beyond natural length} = ${L1 - L0}\\text{ cm} = ${(L1 - L0) / 100}\\text{ m},\\ k = \\frac{${Fn}}{${(L1 - L0) / 100}} = ${T(k.str())}\\ \\text{N/m}`;
+      kSol = [`Stretch beyond natural length: \\(${L1} - ${L0} = ${L1 - L0}\\text{ cm} = ${L1 - L0} \\div 100 = ${dn(new Q(L1 - L0, 100))}\\text{ m}\\).`, `$$F = kx:\\quad ${Fn} = k\\cdot ${dn(new Q(L1 - L0, 100))} \\;\\Rightarrow\\; k = \\frac{${Fn}}{${dn(new Q(L1 - L0, 100))}} = ${dn(k)}\\ \\text{N/m}$$`, `Limits, measured from the natural length: \\(${L2} - ${L0} = ${L2 - L0}\\text{ cm} = ${dn(a)}\\text{ m}\\), \\(${L3} - ${L0} = ${L3 - L0}\\text{ cm} = ${dn(b)}\\text{ m}\\).`];
     } else {
       const W0 = r.pick([2, 3, 4, 6, 8, 9]), d0 = r.pick([new Q(1, 10), new Q(1, 5), new Q(1, 2), q(1)]);
       k = q(2 * W0).div(d0.mul(d0)); const extra = r.pick([new Q(1, 10), new Q(1, 5), new Q(1, 2)]);
@@ -619,7 +761,7 @@
       statement = `It takes ${W0} J of work to stretch a spring ${d0.v} m from its natural length. How much work is needed to stretch it an additional ${extra.v} m?`;
       kMistakes = [{ ans: q(W0).div(d0).str(), msg: 'Work is not force: W = ∫₀ᵈ kx dx = kd²/2, so k = 2W/d².' }, { ans: q(W0).div(d0.mul(d0)).str(), msg: 'W = kd²/2, so k = 2W/d² (you lost the 2).' }];
       bMistakes = [{ ans: extra.str(), msg: `"Additional" means it starts already stretched ${d0.v} m and ends at ${b.v} m.` }];
-      kSol = `${W0} = \\int_0^{${d0.v}} kx\\,dx = \\frac{k}{2}(${d0.v})^2 \\Rightarrow k = ${T(k.str())}\\ \\text{N/m}`;
+      kSol = [`$$${W0} = \\int_0^{${dn(d0)}} kx\\,dx = \\frac{k}{2}(${dn(d0)})^2 = \\frac{k}{2}\\cdot ${dn(d0.mul(d0))} \\;\\Rightarrow\\; k = \\frac{2\\cdot ${W0}}{${dn(d0.mul(d0))}} = \\frac{${2 * W0}}{${dn(d0.mul(d0))}} = ${dn(k)}\\ \\text{N/m}$$`, `It starts already stretched \\(${dn(a)}\\) m and goes an additional \\(${dn(extra)}\\) m: \\(${dn(a)} + ${dn(extra)} = ${dn(b)}\\) m.`];
     }
     const W = k.div(2).mul(b.mul(b).sub(a.mul(a)));
     const steps = [
@@ -630,7 +772,7 @@
       { id: 'final', label: 'Work \\(W\\) (J)', kind: 'num', ans: W.str(), mistakes: [{ ans: k.mul(b.mul(b).sub(a.mul(a))).str(), msg: 'You forgot the 1/2: ∫kx dx = kx²/2.' }, { ans: k.div(2).mul(b.sub(a).mul(b.sub(a))).str(), msg: 'It is (k/2)(b² − a²), not (k/2)(b − a)².' }], hint: 'W = (k/2)(b² − a²).' },
     ];
     return finalize({ statement, steps, answer: W.str(),
-      solution: [`$$${kSol}$$`, `$$W = \\int_{${a.v}}^{${b.v}} ${T(k.str())}x\\,dx = \\frac{${T(k.str())}}{2}\\left[x^2\\right]_{${a.v}}^{${b.v}} = ${T(W.str())}\\ \\text{J} \\approx ${fmt(W.v)}\\ \\text{J}$$`],
+      solution: [...kSol, `$$W = \\int_{${dn(a)}}^{${dn(b)}} ${dn(k)}\\,x\\,dx = ${dn(k)}\\Big[\\frac{x^2}{2}\\Big]_{${dn(a)}}^{${dn(b)}} = \\frac{${dn(k)}}{2}\\left(b^2 - a^2\\right)$$`, `$$b^2 = ${dn(b)}^2 = ${dn(b.mul(b))},\\qquad a^2 = ${dn(a)}^2 = ${dn(a.mul(a))},\\qquad b^2 - a^2 = ${dn(b.mul(b))} - ${dn(a.mul(a))} = ${dn(b.mul(b).sub(a.mul(a)))}$$`, `$$\\frac{${dn(k)}}{2} = ${dn(k.div(2))},\\qquad W = ${dn(k.div(2))} \\times ${dn(b.mul(b).sub(a.mul(a)))} = ${dn(W)}\\ \\text{J}$$`],
       truth: () => Check.simpson(x => k.v * x, a.v, b.v, 100) });
   }
   function chain(r) {
@@ -644,13 +786,15 @@
     const what = us ? `A ${L}-ft ${obj} weighing ${rho.v} lb/ft` : `A ${L}-m ${obj} with density ${rho.v} kg/m`;
     const load = us ? r.pick([5, 10, 20]) : r.pick([5, 10, 20]);
     let statement, steps, W, sol;
+    const intY = (top, name) => [`$$${name} = \\int_0^{${dn(top)}} ${dn(delta)}\\,y\\,dy = ${dn(delta)}\\Big[\\frac{y^2}{2}\\Big]_0^{${dn(top)}} = ${dn(delta)}\\cdot\\frac{${dn(top)}^2}{2}$$`,
+      `$$${dn(top)}^2 = ${dn(top)} \\times ${dn(top)} = ${dn(top.mul(top))},\\qquad \\frac{${dn(top.mul(top))}}{2} = ${dn(top.mul(top).div(2))},\\qquad ${name} = ${dn(delta)} \\times ${dn(top.mul(top).div(2))} = ${dn(delta.mul(top.mul(top).div(2)))}\\ \\text{${unitW}}$$`];
     const deltaStep = { id: 'delta', label: `Weight per unit length (${us ? 'lb/ft' : 'N/m'})`, kind: 'num', ans: delta.str(), mistakes: us ? [] : [{ ans: rho.str(), msg: 'Mass is not weight: multiply kg/m by g = 9.8 m/s² to get N/m.' }], hint: us ? 'Already given as a weight per foot.' : 'Weight = mass × g: ρ·9.8.' };
     const integrandStep = { id: 'integrand', label: `Integrand: \\(W = \\int_0^{?} (\\;?\\;)\\,dy\\), \\(y\\) = distance of a slice below the top`, kind: 'expr', v: 'y', lo: 0, hi: L, ans: `${delta.str()} * y`, mistakes: [{ ans: `${delta.str()} * (${L} - y)`, msg: `With y measured down from the top, a slice at depth y is lifted y, not ${L} − y.` }, { ans: `${rho.str()} * y`, msg: 'Use weight per length (ρg), not mass per length.' }], hint: 'Each slice (weight δ dy) at depth y rises y.' };
     if (variant === 'all') {
       W = delta.mul(L * L).div(2);
       statement = `${what} hangs from the top of a tall building. How much work is required to pull the entire ${obj} to the top?`;
       steps = [deltaStep, integrandStep, { id: 'final', label: `Work (${unitW})`, kind: 'num', ans: W.str(), mistakes: [{ ans: delta.mul(L * L).str(), msg: 'Forgot the 1/2: ∫₀ᴸ δy dy = δL²/2.' }, { ans: delta.mul(L).str(), msg: 'Each slice rises a different distance, so integrate: δ∫₀ᴸ y dy.' }], hint: 'δ L²/2.' }];
-      sol = [`$$W = \\int_0^{${L}} ${T(delta.str())}\\,y\\,dy = ${T(delta.str())}\\cdot\\frac{${L}^2}{2} = ${T(W.str())}\\ \\text{${unitW}}$$`];
+      sol = intY(q(L), 'W');
     } else if (variant === 'half') {
       const hq = new Q(L, 2), h = hq.v;
       const Wtop = delta.mul(hq).mul(hq).div(2), Wbot = delta.mul(hq).mul(hq);
@@ -660,7 +804,10 @@
         { id: 'top', label: `Work to wind the top half (${unitW})`, kind: 'num', ans: Wtop.str(), hint: `δ∫₀^${h} y dy.` },
         { id: 'bot', label: `Work to lift the bottom half ${h} ${unitL} (${unitW})`, kind: 'num', ans: Wbot.str(), mistakes: [{ ans: delta.mul(q(L * L).sub(hq.mul(hq))).div(2).str(), msg: `The bottom half does not reach the top; every bottom slice rises exactly ${h} ${unitL}: (weight of bottom half)(${h}).` }], hint: `Weight of bottom half = δ·${h}; it all rises ${h}.` },
         { id: 'final', label: `Total work (${unitW})`, kind: 'num', ans: W.str(), mistakes: [{ ans: Wtop.str(), msg: 'Add the work of raising the bottom half too.' }], hint: 'Add the two parts.' }];
-      sol = [`$$W_{\\text{top}} = \\int_0^{${h}} ${T(delta.str())}\\,y\\,dy = ${T(Wtop.str())},\\qquad W_{\\text{bottom}} = (${T(delta.str())}\\cdot ${h})(${h}) = ${T(Wbot.str())}$$`, `$$W = ${T(W.str())}\\ \\text{${unitW}}$$`];
+      sol = [`Top half: each slice at depth \\(y\\) from 0 to \\(${L} \\div 2 = ${dn(hq)}\\) rises \\(y\\).`, ...intY(hq, 'W_{\\text{top}}'),
+        `Bottom half: it all rises exactly \\(${dn(hq)}\\) ${unitL}. Its weight is \\(${dn(delta)} \\times ${dn(hq)} = ${dn(delta.mul(hq))}\\) ${us ? 'lb' : 'N'}.`,
+        `$$W_{\\text{bottom}} = ${dn(delta.mul(hq))} \\times ${dn(hq)} = ${dn(Wbot)}\\ \\text{${unitW}}$$`,
+        `$$W = W_{\\text{top}} + W_{\\text{bottom}} = ${dn(Wtop)} + ${dn(Wbot)} = ${dn(W)}\\ \\text{${unitW}}$$`];
     } else {
       const Wc = delta.mul(L * L).div(2), Wl = us ? q(load).mul(L) : q(load).mul(G_M).mul(L);
       W = Wc.add(Wl);
@@ -669,10 +816,14 @@
         { id: 'chainW', label: `Work for the ${obj} alone (${unitW})`, kind: 'num', ans: Wc.str(), hint: 'δL²/2.' },
         { id: 'loadW', label: `Work for the weight alone (${unitW})`, kind: 'num', ans: Wl.str(), mistakes: us ? [] : [{ ans: q(load * L).str(), msg: 'Weight = mass × 9.8.' }], hint: `Constant force × ${L} ${unitL}.` },
         { id: 'final', label: `Total work (${unitW})`, kind: 'num', ans: W.str(), mistakes: [], hint: 'Add them.' }];
-      sol = [`$$W_{${obj}} = \\int_0^{${L}} ${T(delta.str())}\\,y\\,dy = ${T(Wc.str())},\\qquad W_{\\text{load}} = ${us ? load : load + '(9.8)'}(${L}) = ${T(Wl.str())}$$`, `$$W = ${T(W.str())}\\ \\text{${unitW}}$$`];
+      sol = [`The ${obj}:`, ...intY(q(L), `W_{\\text{${obj}}}`),
+        `The weight: ${us ? `\\(${load}\\) lb` : `\\(${load} \\times 9.8 = ${dn(q(load).mul(G_M))}\\) N`}, lifted the full \\(${L}\\) ${unitL}:`,
+        `$$W_{\\text{load}} = ${dn(us ? q(load) : q(load).mul(G_M))} \\times ${L} = ${dn(Wl)}\\ \\text{${unitW}}$$`,
+        `$$W = W_{\\text{${obj}}} + W_{\\text{load}} = ${dn(Wc)} + ${dn(Wl)} = ${dn(W)}\\ \\text{${unitW}}$$`];
     }
     if (!us) steps[steps.length - 1].mistakes.push({ ans: W.div(G_M).str(), msg: 'You left out g = 9.8.' });
-    return finalize({ statement: statement + (us ? '' : ' Use g = 9.8 m/s².'), steps, answer: W.str(), solution: [`Measure \\(y\\) down from the top. A slice at depth \\(y\\) has weight \\(${T(delta.str())}\\,dy\\) and rises \\(y\\).`, ...sol],
+    return finalize({ statement: statement + (us ? '' : ' Use g = 9.8 m/s².'), steps, answer: W.str(), solution: [us ? `Weight per foot: \\(\\delta = ${dn(delta)}\\) lb/ft (already a weight).` : `Weight per meter: \\(\\delta = \\rho g = ${dn(rho)} \\times 9.8 = ${dn(delta)}\\) N/m.`,
+        `Measure \\(y\\) down from the top. A slice at depth \\(y\\) has weight \\(${dn(delta)}\\,dy\\) and rises \\(y\\), so the integrand is \\(${dn(delta)}\\,y\\).`, ...sol],
       truth: () => { // brute-force: sum over slices of weight * rise
         const n = 20000, h = L / n; let s = 0;
         for (let i = 0; i < n; i++) { const y = (i + 0.5) * h; const rise = variant === 'half' ? Math.min(y, L / 2) : y; s += delta.v * h * rise; }
@@ -685,12 +836,12 @@
     const us = r.next() < 0.25;
     const wd = us ? q(125, 2) : q(9800); // weight density: 62.5 lb/ft^3 or 1000*9.8 N/m^3
     const u = us ? 'ft' : 'm';
-    let A, H, desc, Atex, raw, areaMistakes = [], isPi = false;
-    if (shape === 'cyl') { const rad = r.pick([1, 2, 3, 4]); H = r.pick([2, 4, 5, 6, 8]); A = GP.k(rad * rad); isPi = true; desc = `A cylindrical tank (standing upright) has radius ${rad} ${u} and height ${H} ${u}`; raw = y => Math.PI * rad * rad; }
-    else if (shape === 'box') { const l = r.pick([2, 3, 4, 5]), w = r.pick([2, 3, 4]); H = r.pick([2, 3, 4, 5]); A = GP.k(l * w); desc = `A rectangular tank has a base ${l} ${u} by ${w} ${u} and height ${H} ${u}`; raw = () => l * w; }
-    else if (shape === 'cone') { const R0 = r.pick([1, 2, 3, 4]); H = r.pick([2, 3, 4, 6]); A = GP.x(2, new Q(R0 * R0, H * H)); isPi = true; desc = `A conical tank with its vertex pointing down has radius ${R0} ${u} at the top and height ${H} ${u}`; raw = y => Math.PI * (R0 * y / H) ** 2; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The radius shrinks toward the vertex: by similar triangles r(y) = (${R0}/${H})y, so A = π r² uses that.` }]; }
-    else if (shape === 'trough') { const len = r.pick([4, 5, 6, 10]), w = r.pick([2, 3, 4]); H = r.pick([1, 2, 3]); A = GP.x(1, new Q(len * w, H)); desc = `A trough ${len} ${u} long has cross-sections that are isosceles triangles (vertex down) ${w} ${u} wide at the top and ${H} ${u} tall`; raw = y => len * w * y / H; areaMistakes = [{ ans: `${len * w}`, msg: `The width shrinks toward the bottom: w(y) = (${w}/${H})y, so A(y) = ${len}·w(y).` }]; }
-    else { const R0 = r.pick([1, 2, 3, 4]); H = R0; A = GP.poly(-1, 2 * R0, 0); isPi = true; desc = `A hemispherical bowl (flat side up) has radius ${R0} ${u}`; raw = y => Math.PI * (R0 * R0 - (R0 - y) ** 2); areaMistakes = [{ ans: `${R0 * R0}`, msg: `The circle radius depends on height: r² = ${R0}² − (${R0} − y)².` }]; }
+    let A, H, desc, Atex, raw, areaMistakes = [], isPi = false, areaWork;
+    if (shape === 'cyl') { const rad = r.pick([1, 2, 3, 4]); H = r.pick([2, 4, 5, 6, 8]); A = GP.k(rad * rad); isPi = true; desc = `A cylindrical tank (standing upright) has radius ${rad} ${u} and height ${H} ${u}`; raw = y => Math.PI * rad * rad; areaWork = `A(y) = \\pi r^2 = \\pi\\cdot ${rad}^2 = ${rad * rad === 1 ? '' : rad * rad}\\pi`; }
+    else if (shape === 'box') { const l = r.pick([2, 3, 4, 5]), w = r.pick([2, 3, 4]); H = r.pick([2, 3, 4, 5]); A = GP.k(l * w); desc = `A rectangular tank has a base ${l} ${u} by ${w} ${u} and height ${H} ${u}`; raw = () => l * w; areaWork = `A(y) = \\text{length}\\times\\text{width} = ${l}\\times ${w} = ${l * w}`; }
+    else if (shape === 'cone') { const R0 = r.pick([1, 2, 3, 4]); H = r.pick([2, 3, 4, 6]); A = GP.x(2, new Q(R0 * R0, H * H)); isPi = true; desc = `A conical tank with its vertex pointing down has radius ${R0} ${u} at the top and height ${H} ${u}`; raw = y => Math.PI * (R0 * y / H) ** 2; areaWork = `\\text{similar triangles: }\\frac{r}{y} = \\frac{${R0}}{${H}}\\Rightarrow r = \\frac{${R0}}{${H}}y,\\qquad A(y) = \\pi r^2 = \\pi\\left(\\frac{${R0}}{${H}}y\\right)^2 = \\pi\\cdot\\frac{${R0}^2}{${H}^2}y^2 = \\pi\\cdot\\frac{${R0 * R0}}{${H * H}}y^2`; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The radius shrinks toward the vertex: by similar triangles r(y) = (${R0}/${H})y, so A = π r² uses that.` }]; }
+    else if (shape === 'trough') { const len = r.pick([4, 5, 6, 10]), w = r.pick([2, 3, 4]); H = r.pick([1, 2, 3]); A = GP.x(1, new Q(len * w, H)); desc = `A trough ${len} ${u} long has cross-sections that are isosceles triangles (vertex down) ${w} ${u} wide at the top and ${H} ${u} tall`; raw = y => len * w * y / H; areaWork = `\\text{width (similar triangles): } \\frac{${w}}{${H}}y,\\qquad A(y) = \\text{length}\\times\\text{width} = ${len}\\cdot\\frac{${w}}{${H}}y = \\frac{${len}\\cdot ${w}}{${H}}y = \\frac{${len * w}}{${H}}y`; areaMistakes = [{ ans: `${len * w}`, msg: `The width shrinks toward the bottom: w(y) = (${w}/${H})y, so A(y) = ${len}·w(y).` }]; }
+    else { const R0 = r.pick([1, 2, 3, 4]); H = R0; A = GP.poly(-1, 2 * R0, 0); isPi = true; desc = `A hemispherical bowl (flat side up) has radius ${R0} ${u}`; raw = y => Math.PI * (R0 * R0 - (R0 - y) ** 2); areaWork = `\\text{center at } y = ${R0}\\text{, Pythagoras: } r^2 = ${R0}^2 - (${R0} - y)^2 = ${R0 * R0} - (${R0 * R0} - ${2 * R0}y + y^2) = ${2 * R0}y - y^2,\\qquad A(y) = \\pi r^2 = \\pi(${2 * R0}y - y^2)`; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The circle radius depends on height: r² = ${R0}² − (${R0} − y)².` }]; }
     const depthFrac = r.pick([1, 1, new Q(1, 2)]), D = q(H).mul(depthFrac);
     const out = r.pick([0, 0, 1, 2]);
     const top = H + out;
@@ -711,8 +862,12 @@
     return finalize({
       statement: `${desc} and ${filled}. How much work is required to pump all of the water ${dest}? Use ${us ? 'a weight density of 62.5 lb/ft³' : 'ρ = 1000 kg/m³ and g = 9.8 m/s²'}; measure \\(y\\) up from the bottom of the tank.`,
       steps, answer: ans,
-      solution: [`Slice at height \\(y\\): area \\(A(y) = ${T(Aexpr)}\\), weight \\(${us ? '62.5' : '9800'}\\,A(y)\\,dy\\), lifted \\(${T(lift.str('y'))}\\).`,
-        `$$W = ${us ? '62.5' : '9800'}\\int_0^{${T(D.str())}} ${T(Aexpr)}\\,(${T(lift.str('y'))})\\,dy = ${T(ans)}\\ \\text{${us ? 'ft·lb' : 'J'}} \\approx ${fmt(Check.evalNum(ans))}$$`],
+      solution: [us ? 'Weight density: \\(62.5\\) lb/ft³ (already a weight).' : 'Weight density: \\(\\rho g = 1000 \\times 9.8 = 9800\\) N/m³.',
+        `Slice the water horizontally at height \\(y\\). Its area:`, `$$${areaWork}${shape === 'cyl' || shape === 'box' ? '' : ` = ${T(Aexpr)}`}$$`,
+        `The water must reach height \\(${out ? `${H} + ${out} = ${top}` : top}\\), so a slice at height \\(y\\) is lifted \\(${top} - y\\).`,
+        `The water runs from \\(y = 0\\) to \\(y = ${depthFrac === 1 ? H : `\\frac{1}{2}\\cdot ${H} = ${dn(D)}`}\\). Each slice: weight \\(${us ? '62.5' : '9800'}\\,A(y)\\,dy\\) times distance lifted.`,
+        `${isPi ? 'Pull \\(\\pi\\) out front, then multiply' : 'Multiply'} area by lift, every term: $$${mulGP(A, lift, 'y')}$$`,
+        ...integralSteps({ G: Gint, v: 'y', a: q(0), b: D, factor: (us ? '62.5' : '9800') + (isPi ? '\\pi' : ''), factorQ: wd, pi: isPi, what: 'W', unit: us ? 'ft·lb' : 'J', sym: 'W', dec: true }).work],
       truth: () => { const n = 20000, h = D.v / n; let s = 0; for (let i = 0; i < n; i++) { const y = (i + 0.5) * h; s += wd.v * raw(y) * h * (top - y); } return s; },
     });
   }
@@ -737,8 +892,13 @@
     ];
     return finalize({ statement: `${desc[0].toUpperCase() + desc.slice(1)} is submerged vertically in water with its top edge ${s ? s + ' ' + u + ' below' : 'at'} the surface. Find the force on one side of the plate. Use ${us ? 'weight density 62.5 lb/ft³' : 'ρ = 1000 kg/m³, g = 9.8 m/s²'}; let \\(y\\) be the height above the bottom of the plate.`,
       steps, answer: val.str(),
-      solution: [`Surface at \\(y = ${a}\\). Strip at height \\(y\\): width \\(${T(w.str('y'))}\\), depth \\(${T(depth.str('y'))}\\), pressure \\(${us ? '62.5' : '9800'}\\cdot\\text{depth}\\).`,
-        `$$F = ${us ? '62.5' : '9800'}\\int_0^{${Hp}} (${T(depth.str('y'))})(${T(w.str('y'))})\\,dy = ${T(val.str())}\\ \\text{${us ? 'lb' : 'N'}}$$`],
+      solution: [us ? 'Weight density: \\(62.5\\) lb/ft³ (already a weight).' : 'Weight density: \\(\\rho g = 1000 \\times 9.8 = 9800\\) N/m³.',
+        `Cut the plate into horizontal strips. Pressure at depth \\(d\\) is \\(${us ? '62.5' : '9800'}\\,d\\); a strip's force is pressure times its area \\(w(y)\\,dy\\).`,
+        shape === 'rect' ? `Width: the plate is \\(${raw(0)}\\) wide everywhere, so \\(w(y) = ${raw(0)}\\).`
+          : `Width: \\(${raw(0)}\\) at the bottom (\\(y = 0\\)), \\(${raw(Hp)}\\) at the top (\\(y = ${Hp}\\)), changing in a straight line: $$w(y) = ${raw(0)} + \\frac{${raw(Hp)} - ${raw(0)}}{${Hp}}\\,y = ${raw(0)} + \\frac{${raw(Hp) - raw(0)}}{${Hp}}\\,y = ${T(w.str('y'))}$$`,
+        `Depth: the top of the plate is at \\(y = ${Hp}\\) and the surface is ${s ? `\\(${s}\\) higher, at \\(y = ${Hp} + ${s} = ${a}\\)` : `right there, at \\(y = ${a}\\)`}. So a strip at height \\(y\\) is \\(${a} - y\\) deep.`,
+        `Integrate over the plate only, \\(y = 0\\) to \\(y = ${Hp}\\). Multiply depth by width, every term: $$${mulGP(depth, w, 'y')}$$`,
+        ...integralSteps({ G: Gi, v: 'y', a: q(0), b: q(Hp), factor: us ? '62.5' : '9800', factorQ: wd, what: 'F', unit: us ? 'lb' : 'N', sym: 'F', anti: 'G', dec: true }).work],
       truth: () => { const n = 20000, h = Hp / n; let S = 0; for (let i = 0; i < n; i++) { const y = (i + 0.5) * h; S += wd.v * (a - y) * raw(y) * h; } return S; } });
   }
   function mass(r) {
@@ -750,7 +910,8 @@
       { id: 'final', label: 'Mass (kg)', kind: 'num', ans: M.str(), mistakes: [{ ans: q(rho.at(L)).mul(L).str(), msg: 'Density varies along the bar: integrate it, don\'t multiply density at the end by length.' }], hint: 'F(L) − F(0).' },
     ];
     return finalize({ statement: `A thin bar on \\(0 \\le x \\le ${L}\\) (m) has density \\(\\rho(x) = ${T(rho.str('x'))}\\) kg/m. Find its mass.`, steps, answer: M.str(),
-      solution: [`$$m = \\int_0^{${L}} (${T(rho.str('x'))})\\,dx = \\Big[${T(F.str('x'))}\\Big]_0^{${L}} = ${T(M.str())}\\ \\text{kg}$$`],
+      solution: [`Mass is density integrated along the bar, from \\(x = 0\\) to \\(x = ${L}\\):`,
+        ...integralSteps({ G: rho, v: 'x', a: q(0), b: q(L), what: 'm', unit: 'kg', sym: 'm' }).work],
       truth: () => Check.simpson(x => rho.num(x), 0, L, 200) });
   }
 
@@ -772,10 +933,16 @@
     return finalize({
       statement: 'Let \\(R\\) be the region bounded by \\(y = \\sqrt{4 - 2x^2}\\), \\(y = 0\\), and \\(x = 0\\) in the first quadrant. Use the shell method to find the volume of the solid generated when \\(R\\) is revolved about the \\(y\\)-axis.',
       steps, answer: '8 pi / 3', fac: 2 * Math.PI,
-      solution: ['Shells are parallel to the \\(y\\)-axis, so they have thickness \\(dx\\); \\(x\\) runs from \\(0\\) to \\(\\sqrt 2\\) (where \\(4 - 2x^2 = 0\\)).',
-        '$$\\text{radius} = x,\\qquad \\text{height} = \\sqrt{4 - 2x^2}$$',
-        '$$V = 2\\pi\\int_0^{\\sqrt 2} x\\sqrt{4 - 2x^2}\\,dx,\\quad u = 4 - 2x^2,\\ du = -4x\\,dx$$',
-        '$$V = 2\\pi\\Big[-\\tfrac{1}{6}(4 - 2x^2)^{3/2}\\Big]_0^{\\sqrt 2} = 2\\pi\\left(0 + \\tfrac{8}{6}\\right) = \\frac{8\\pi}{3} \\approx 8.3776$$'],
+      solution: ['Shells are parallel to the \\(y\\)-axis, so they have thickness \\(dx\\). The curve meets \\(y = 0\\) where:',
+        '$$4 - 2x^2 = 0 \\;\\Rightarrow\\; 2x^2 = 4 \\;\\Rightarrow\\; x^2 = 4 \\div 2 = 2 \\;\\Rightarrow\\; x = \\sqrt 2$$ so \\(x\\) runs from \\(0\\) to \\(\\sqrt 2\\).',
+        '$$\\text{radius} = x - 0 = x,\\qquad \\text{height} = \\sqrt{4 - 2x^2} - 0 = \\sqrt{4 - 2x^2}$$',
+        '$$V = 2\\pi\\int_0^{\\sqrt 2} x\\sqrt{4 - 2x^2}\\,dx$$',
+        'Substitute \\(u = 4 - 2x^2\\): \\(du = -2\\cdot 2x\\,dx = -4x\\,dx\\), so \\(x\\,dx = -\\frac{du}{4}\\).',
+        '$$\\int x\\sqrt{4 - 2x^2}\\,dx = -\\frac{1}{4}\\int u^{1/2}\\,du = -\\frac{1}{4}\\cdot\\frac{u^{3/2}}{3/2} = -\\frac{1}{4}\\cdot\\frac{2}{3}u^{3/2} = -\\frac{2}{12}u^{3/2} = -\\frac{1}{6}(4 - 2x^2)^{3/2} = F(x)$$',
+        '$$F(\\sqrt 2) = -\\frac{1}{6}\\big(4 - 2\\cdot(\\sqrt 2)^2\\big)^{3/2} = -\\frac{1}{6}(4 - 2\\cdot 2)^{3/2} = -\\frac{1}{6}\\cdot 0^{3/2} = 0$$',
+        '$$F(0) = -\\frac{1}{6}(4 - 2\\cdot 0^2)^{3/2} = -\\frac{1}{6}\\cdot 4^{3/2} = -\\frac{1}{6}\\cdot(\\sqrt 4)^3 = -\\frac{1}{6}\\cdot 2^3 = -\\frac{8}{6} = -\\frac{4}{3}$$',
+        '$$F(\\sqrt 2) - F(0) = 0 - \\left(-\\frac{4}{3}\\right) = \\frac{4}{3}$$',
+        '$$V = 2\\pi\\cdot\\frac{4}{3} = \\frac{2\\cdot 4}{3}\\pi = \\frac{8\\pi}{3} \\approx 8.3776$$'],
       truth: () => Check.simpson(x => 2 * Math.PI * x * Math.sqrt(Math.max(0, 4 - 2 * x * x)), 0, b, 20000),
     });
   }

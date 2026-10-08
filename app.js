@@ -151,8 +151,9 @@
       });
       stepsBox.append(el); return el;
     });
-    const endBox = h('div');
-    m.append(endBox);
+    const endBox = h('div'), solBox = h('div');
+    m.append(endBox, solBox);
+    function showSol() { if (!solBox.firstChild) solBox.append(math(h('div', { class: 'panel' }, h('div', { class: 'solution' }, h('h4', {}, 'Worked solution'), ...p.solution.map(x => h('div', { html: x })))))); }
     function sync() {
       els.forEach((el, i) => {
         const locked = i > practice.idx;
@@ -175,24 +176,26 @@
       if (i !== practice.idx) return;
       const s = p.steps[i], el = els[i];
       const res = Check.grade(s, el._input.value);
+      if (res.ok || el._input.value.trim()) showSol();
       if (res.ok) return done(i, 'ok');
       if (el._input.value.trim()) practice.missed.add(s.id);
       el._fb.className = 'fb bad'; el._fb.textContent = '✗ ' + res.msg;
     }
-    function reveal(i) { if (i !== practice.idx) return; practice.missed.add(p.steps[i].id); done(i, 'shown'); }
+    function reveal(i) { if (i !== practice.idx) return; practice.missed.add(p.steps[i].id); showSol(); done(i, 'shown'); }
     function finish() {
       const clean = practice.missed.size === 0;
       if (!practice.recorded) { record(p.type, clean, [...practice.missed]); practice.recorded = true; }
       const s = store.types[p.type];
       endBox.append(math(h('div', { class: 'panel' },
         h('p', { class: 'fb ' + (clean ? 'good' : 'bad') }, clean ? `Clean solve. Streak ${Math.min(s.streak, 3)}/3${s.streak >= 3 ? ' (mastered)' : ''}.` : `Missed: ${[...practice.missed].map(stepName).join(', ')}. Streak reset to 0; this type will come back.`),
-        h('div', { class: 'solution' }, h('h4', {}, 'Worked solution'), ...p.solution.map(x => h('div', { html: x }))),
         h('p', {}, h('button', { class: 'btn primary', onclick: () => { nextProblem(); renderPractice(); } }, 'Next problem')))));
+      showSol();
       renderTypeList();
       endBox.querySelector('.btn.primary').focus();
     }
     // restore progress when re-rendering the same problem
     for (let i = 0; i < practice.idx; i++) { els[i].classList.add('done'); els[i]._fb.className = 'fb good'; els[i]._fb.textContent = '✓'; }
+    if (practice.idx > 0) showSol();
     sync();
     if (practice.idx >= p.steps.length) finish();
   }
