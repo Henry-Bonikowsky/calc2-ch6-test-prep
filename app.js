@@ -141,7 +141,7 @@
         el._input.disabled = i !== practice.idx;
         el.querySelectorAll('button').forEach(b => b.disabled = i !== practice.idx);
       });
-      if (practice.idx < els.length) els[practice.idx]._input.focus();
+      if (practice.idx < els.length && (practice.idx > 0 || !matchMedia('(pointer: coarse)').matches)) els[practice.idx]._input.focus({ preventScroll: practice.idx === 0 });
     }
     function done(i, how) {
       const el = els[i], s = p.steps[i];
