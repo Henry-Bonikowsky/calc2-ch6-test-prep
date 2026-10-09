@@ -227,6 +227,27 @@ for (let seed = 1; seed <= N * 3; seed++) {
   renders(fake, d.q + d.options.join(' ') + d.why, 'drill');
 }
 
+// Table 8.1 formulas: answer key differentiates back to the integrand, wrong options are really wrong,
+// multiple choice has exactly one right option, book-notation typing is accepted, everything renders.
+const Formulas = require(path.join(root, 'formulas.js'));
+Formulas.F.forEach((f, k) => {
+  const fake = { type: 'tbl#' + (k + 1), seed: 0 };
+  renders(fake, `\\(${f.lhs} = ${f.rhs}\\) ${f.cond || ''} ${f.wrong.map(w => `\\(${w[0]}\\)`).join(' ')}`, 'formula');
+  const A = Check.compile(f.ans).fn, I = Check.compile(f.f).fn;
+  for (const P of Formulas.PARAMS) for (const [lo, hi] of f.dom(P.a)) for (const x of Check.samples(lo, hi, 7)) {
+    const d = numDeriv(t => A({ ...P, x: t }), x), want = I({ ...P, x });
+    ok(isFinite(want) && rel(d, want, 1e-6), fake, `d/dx answer ${d} != integrand ${want} at x=${x}, a=${P.a}`);
+  }
+  ok(Formulas.grade(k, f.ans).ok, fake, 'answer key rejected');
+  for (const [t, e] of f.wrong) { ok(!Formulas.grade(k, e).ok, fake, `wrong option accepted: ${e}`); ok(t !== f.rhs, fake, 'wrong option equals rhs'); }
+  for (let i = 0; i < 20; i++) { const o = Formulas.options(k); ok(o.length === 4 && new Set(o).size === 4 && o.filter(x => x === f.rhs).length === 1, fake, `bad options ${JSON.stringify(o)}`); }
+});
+const typed = [[0, 'kx + C'], [1, 'x^(p+1)/(p+1)'], [2, '1/a sin ax'], [3, '-1/a cos(ax) + C'], [4, '1/a tan ax'], [5, '-1/a cot ax'], [6, 'sec(ax)/a'], [7, '-1/a csc ax'], [8, '1/a e^(ax)'],
+  [9, 'ln|x| + C'], [10, '1/a tan^-1 (x/a)'], [11, 'sin^-1(x/a)'], [12, '1/a sec^-1|x/a|'], [13, '1/a ln|sec ax|'], [13, '-1/a ln|cos ax|'], [14, '1/a ln|sin ax|'], [15, '1/a ln|sec ax + tan ax| + C'], [16, '-1/a ln|csc ax + cot ax|']];
+for (const [k, s] of typed) { checks++; const g = Formulas.grade(k, s); if (!g.ok) fails.push(`formula #${k + 1}: book-notation "${s}" rejected (${g.msg})`); }
+const typedWrong = [[2, 'sin ax', /1}{a}/], [3, '1/a cos ax', /Sign/], [9, 'ln(x)', /absolute/], [12, '1/a sec^-1(x/a)', /absolute/], [6, 'a sec ax', /instead/]];
+for (const [k, s, re] of typedWrong) { checks++; const g = Formulas.grade(k, s); if (g.ok || !re.test(g.msg)) fails.push(`formula #${k + 1}: "${s}" got ${JSON.stringify(g)}`); }
+
 // Worked solutions must actually be worked: at least 3 checked arithmetic steps per problem on average.
 for (const [id, s] of Object.entries(workStats)) { checks++; if (!['arc-setup', 'hw'].includes(id) && s.eqs < 3 * s.problems) fails.push(`worked solution for ${id}: only ${s.eqs} checked arithmetic steps in ${s.problems} problems`); }
 

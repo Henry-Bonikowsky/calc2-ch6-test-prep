@@ -78,3 +78,10 @@ th { color: var(--muted); font-weight: 600; }
   #view-test td { border: 0; padding: 2px 0; }
   #view-test td:nth-child(2)::before { content: "Your answer: "; color: var(--muted); font-family: system-ui, sans-serif; }
 }
+/* Not-on-the-test group (sidebar, cards) and Table 8.1 formula drill. */
+details.not-on-test { margin-top: 14px; }
+details.not-on-test > summary { cursor: pointer; color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+.formula.q { font-size: 20px; }
+.formula.flip { font-size: 20px; color: var(--good); }
+.modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.fq .opt b { color: var(--muted); }

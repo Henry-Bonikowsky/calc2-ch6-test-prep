@@ -12,7 +12,7 @@
     split: 'dx or dy: avoid splitting',
     distance: 'Distance vs displacement vs position',
     shift: 'What changes when the axis moves',
-    work: 'Physical setup pieces',
+    work: 'Pumping: lift distance',
   };
   const axisName = (kind, k) => kind === 'h' ? (k === 0 ? 'the \\(x\\)-axis' : `the line \\(y = ${k}\\)`) : (k === 0 ? 'the \\(y\\)-axis' : `the line \\(x = ${k}\\)`);
 
@@ -95,7 +95,7 @@
       return { q: `Washer method: you switch the axis from ${axisName(kind, 0)} to ${axisName(kind, k)}. What changes in the setup?`, options: opts, correct: opts[0], why: 'Each radius is a distance to the axis, so both are re-measured from the new line. The bounds stay the same.' };
     },
     work(r) {
-      const t = r.pick(['spring', 'pump', 'plate', 'chain']);
+      const t = 'pump'; // only pumping is on the test; spring, plate, chain kept below
       if (t === 'spring') {
         const L0 = r.pick([10, 20, 25]), L1 = L0 + r.pick([5, 10, 15]);
         const right = `\\(${(L1 - L0) / 100}\\) m`;

@@ -6,7 +6,21 @@
   store.types = store.types || {}; store.drill = store.drill || {};
   const save = () => localStorage.setItem(KEY, JSON.stringify(store));
   const ts = id => (store.types[id] = store.types[id] || { att: 0, clean: 0, streak: 0, miss: {} });
-  const mastered = id => (store.types[id] || {}).streak >= 3;
+  // Table 8.1 formulas: per-formula stats; the pseudo-type 'tbl' stands for all of them in Smart and Mastery.
+  store.formulas = store.formulas || {};
+  const FN = Formulas.F.length;
+  const fs = k => (store.formulas[k] = store.formulas[k] || { att: 0, right: 0, streak: 0 });
+  const fMastered = k => (store.formulas[k] || {}).streak >= 3;
+  const fCount = () => Formulas.F.filter((f, k) => fMastered(k)).length;
+  function recordF(k, right) { const s = fs(k); s.att++; if (right) { s.right++; s.streak++; } else s.streak = 0; save(); }
+  const mastered = id => id === 'tbl' ? fCount() === FN : (store.types[id] || {}).streak >= 3;
+  const ON_TEST = Gen.TYPES.filter(t => !t.off);
+  const SMART_IDS = [...ON_TEST.map(t => t.id), 'tbl'];
+  // Weak formulas first, then untried, then mastered.
+  function pickFormula(avoid) {
+    const ks = Formulas.F.map((f, k) => k).filter(k => k !== avoid);
+    return weightedPick(ks, ks.map(k => { const s = store.formulas[k]; return !s ? 2 : s.streak >= 3 ? 0.5 : 3 + (s.att - s.right); }));
+  }
   function record(id, clean, missed) {
     const s = ts(id); s.att++;
     if (clean) { s.clean++; s.streak++; } else s.streak = 0;
@@ -23,11 +37,14 @@
   }
   // Weak spots first: missed-and-not-mastered > never tried > mastered (review only once everything is mastered).
   function smartType(ids, avoid) {
-    ids = ids || Gen.TYPES.map(t => t.id);
+    ids = ids || SMART_IDS;
     let pool = ids.filter(id => !mastered(id));
     if (!pool.length) pool = ids.slice();
     if (pool.length > 1) pool = pool.filter(id => id !== avoid);
-    const w = pool.map(id => { const s = store.types[id]; if (!s || !s.att) return 1.5; if (mastered(id)) return 1; const misses = Object.values(s.miss).reduce((a, b) => a + b, 0); return 4 + Math.min(misses, 8); });
+    const w = pool.map(id => {
+      if (id === 'tbl') { const ss = Object.values(store.formulas); if (!ss.length) return 1.5; if (mastered(id)) return 1; return 4 + Math.min(ss.reduce((a, s) => a + s.att - s.right, 0), 8); }
+      const s = store.types[id]; if (!s || !s.att) return 1.5; if (mastered(id)) return 1; const misses = Object.values(s.miss).reduce((a, b) => a + b, 0); return 4 + Math.min(misses, 8);
+    });
     return weightedPick(pool, w);
   }
   const newSeed = () => Math.floor(Math.random() * 2 ** 31);
@@ -61,7 +78,7 @@
   new MutationObserver(queueFit).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
   addEventListener('resize', queueFit);
   const texHTML = (expr, display) => { try { return katex.renderToString(Check.tex(expr), { throwOnError: false, displayMode: !!display }); } catch (e) { return String(expr); } };
-  const dots = id => { const s = store.types[id] || { streak: 0 }; const n = Math.min(3, s.streak || 0); return mastered(id) ? h('span', { class: 'mastered' }, '✓ 3/3') : h('span', { class: 'dots', html: '<span class="on">' + '●'.repeat(n) + '</span>' + '○'.repeat(3 - n) }); };
+  const dots = id => { if (id === 'tbl') return mastered(id) ? h('span', { class: 'mastered' }, `✓ ${FN}/${FN}`) : h('span', { class: 'dots' }, `${fCount()}/${FN}`); const s = store.types[id] || { streak: 0 }; const n = Math.min(3, s.streak || 0); return mastered(id) ? h('span', { class: 'mastered' }, '✓ 3/3') : h('span', { class: 'dots', html: '<span class="on">' + '●'.repeat(n) + '</span>' + '○'.repeat(3 - n) }); };
   const INPUT_HELP = 'Type math like 3x^2 - 2x, sqrt(x), x^(3/2), pi, e^x, ln(x), 8pi/27. Use * before a parenthesis after pi: pi*(x+1). The preview shows how your input was read.';
 
   function preview(input, box) {
@@ -71,12 +88,13 @@
   }
 
   // ---------- views ----------
-  const views = ['cards', 'drill', 'practice', 'test', 'dash'];
+  const views = ['cards', 'tbl', 'drill', 'practice', 'test', 'dash'];
   function show(view) {
+    tblKeys = null;
     for (const v of views) { $('#view-' + v).classList.toggle('active', v === view); }
     document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     location.hash = view;
-    ({ cards: renderCards, drill: renderDrill, practice: renderPractice, test: renderTest, dash: renderDash })[view]();
+    ({ cards: renderCards, tbl: renderTbl, drill: renderDrill, practice: renderPractice, test: renderTest, dash: renderDash })[view]();
   }
   document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
 
@@ -93,7 +111,86 @@
   function renderCards() {
     const v = $('#view-cards'); v.innerHTML = '';
     v.append(h('p', { class: 'help' }, 'Each card: the formula, the procedure in order, and (in red) the mistake to avoid at that step. 6.6 surface area is not on the test.'));
-    v.append(math(h('div', { class: 'cards-grid' }, CARDS.map(c => cardEl(c, true)))));
+    const off = c => c.types.every(id => Gen.byId[id] && Gen.byId[id].off);
+    v.append(math(h('div', { class: 'cards-grid' }, CARDS.filter(c => !off(c)).map(c => cardEl(c, true)))));
+    v.append(math(h('details', { class: 'not-on-test' }, h('summary', {}, 'Not on the test'), h('div', { class: 'cards-grid' }, CARDS.filter(off).map(c => cardEl(c, true))))));
+  }
+
+  // ---------- Table 8.1 formulas ----------
+  const tbl = { mode: 'mc', k: null };
+  let tblKeys = null; // keyboard shortcuts of the formula question on screen
+  document.addEventListener('keydown', e => { if (tblKeys && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && !e.ctrlKey && !e.metaKey && !e.altKey) tblKeys(e); });
+  const fTex = (k, rhs) => { const f = Formulas.F[k]; return `\\[${f.lhs} = ${rhs === undefined ? f.rhs : rhs}\\]` + (f.cond ? `<div class="help">${f.cond}</div>` : ''); };
+  // One formula question in the current mode. onAnswer(right) after it is graded; onNext for the next one.
+  function formulaQ(k, onAnswer, onNext) {
+    const f = Formulas.F[k], box = h('div', { class: 'fq' }), mode = tbl.mode === 'list' ? 'mc' : tbl.mode;
+    const fb = h('div', { class: 'fb' }), full = h('div', { class: 'formula', hidden: true, html: fTex(k) });
+    const next = h('button', { class: 'btn primary', hidden: true, onclick: onNext }, 'Next (Enter)');
+    let graded = false;
+    function grade(right, msg) {
+      if (graded) return; graded = true;
+      recordF(k, right); onAnswer && onAnswer(right);
+      fb.className = 'fb ' + (right ? 'good' : 'bad'); fb.innerHTML = right ? `✓ Correct. Streak ${Math.min(fs(k).streak, 3)}/3` : '✗ ' + (msg || 'Not quite.') + ' The formula:'; math(fb);
+      full.hidden = false; next.hidden = false;
+      tblKeys = e => { if (e.key === 'Enter') { e.preventDefault(); onNext(); } };
+      if (!matchMedia('(pointer: coarse)').matches) next.focus();
+    }
+    box.append(h('div', { class: 'formula q', html: fTex(k, '\\;?') }));
+    if (mode === 'mc') {
+      const opts = Formulas.options(k);
+      const os = h('div', { class: 'opts' }, opts.map((o, i) => h('button', { class: 'opt', html: `<b>${i + 1}</b>&nbsp; \\(${o}\\)`, onclick: e => pickOpt(i) })));
+      function pickOpt(i) {
+        if (graded) return;
+        os.querySelectorAll('.opt').forEach((b, j) => { b.disabled = true; if (opts[j] === f.rhs) b.classList.add('right'); else if (j === i) b.classList.add('wrong'); });
+        grade(opts[i] === f.rhs);
+      }
+      box.append(os);
+      tblKeys = e => { const i = +e.key - 1; if (i >= 0 && i < opts.length) pickOpt(i); };
+    } else if (mode === 'type') {
+      const input = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'right side', placeholder: 'e.g. 1/a sin(ax)' });
+      const pv = h('div', { class: 'preview' });
+      const check = () => {
+        if (graded || !input.value.trim()) return;
+        let readable = true; try { Check.parse(Formulas.pre(input.value)); } catch (e) { readable = false; }
+        if (!readable) { fb.className = 'fb bad'; fb.textContent = "Can't read that yet."; return; }
+        const g = Formulas.grade(k, input.value); input.disabled = true; grade(g.ok, g.msg);
+      };
+      input.addEventListener('input', () => { const v = input.value.trim(); if (!v) { pv.innerHTML = ''; return; } try { Check.parse(Formulas.pre(v)); pv.innerHTML = '= ' + texHTML(Formulas.pre(v)) + ' + C'; } catch (e) { pv.textContent = '(can\'t read yet)'; } });
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); if (graded) onNext(); else check(); } });
+      box.append(h('div', { class: 'step' }, h('div', { class: 'row' }, input, h('button', { class: 'btn primary', onclick: check }, 'Check'), h('button', { class: 'btn', onclick: () => { input.disabled = true; grade(false, 'Shown.'); } }, 'Show')), pv),
+        h('p', { class: 'help' }, 'Book notation works: 1/a sin ax, -1/a cos(ax), ln|sec ax|, tan^-1(x/a), sec^-1|x/a|, e^(ax)/a. The + C is optional. The preview shows how it was read.'));
+      tblKeys = null;
+      setTimeout(() => { if (!matchMedia('(pointer: coarse)').matches) input.focus({ preventScroll: true }); });
+    } else {
+      const back = h('div', { class: 'formula flip', hidden: true, html: `\\[= ${f.rhs}\\]` });
+      const flip = h('button', { class: 'btn primary', onclick: () => doFlip() }, 'Flip (Space)');
+      const self = h('div', { class: 'row', hidden: true }, h('button', { class: 'btn', onclick: () => selfGrade(true) }, 'Knew it (1)'), ' ', h('button', { class: 'btn', onclick: () => selfGrade(false) }, 'Missed it (2)'));
+      function doFlip() { if (!back.hidden) return; back.hidden = false; flip.hidden = true; self.hidden = false; tblKeys = e => { if (e.key === '1') selfGrade(true); if (e.key === '2') selfGrade(false); }; }
+      function selfGrade(right) { if (graded) return; self.hidden = true; back.hidden = true; grade(right, 'Keep drilling this one.'); }
+      box.append(back, h('p', {}, flip), self);
+      tblKeys = e => { if (e.key === ' ') { e.preventDefault(); doFlip(); } };
+    }
+    box.append(fb, full, h('p', {}, next));
+    return math(box);
+  }
+  function formulaTable() {
+    return math(h('table', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Formula'), h('th', {}, 'Streak'), h('th', {}, 'Right / tried')),
+      Formulas.F.map((f, k) => { const s = store.formulas[k] || { att: 0, right: 0, streak: 0 }; return h('tr', {}, h('td', {}, String(k + 1)), h('td', { html: `\\(${f.lhs} = ${f.rhs}\\)` }), h('td', {}, fMastered(k) ? h('span', { class: 'mastered' }, '✓ 3/3') : h('span', { class: 'dots', html: '<span class="on">' + '●'.repeat(s.streak) + '</span>' + '○'.repeat(3 - s.streak) })), h('td', {}, `${s.right} / ${s.att}`)); })));
+  }
+  function renderTbl() {
+    const v = $('#view-tbl'); v.innerHTML = '';
+    const modes = { mc: 'Multiple choice', type: 'Type it', flip: 'Flip cards', list: 'Formula cards' };
+    v.append(h('div', { class: 'panel' }, h('h2', {}, 'Basic integration formulas (Table 8.1)'),
+      h('p', { class: 'help' }, `Memorize all ${FN}. A formula is mastered after 3 right in a row; misses come back first. Mastered: ${fCount()} / ${FN}.`),
+      h('div', { class: 'row modes' }, Object.entries(modes).map(([m, n]) => h('button', { class: 'btn' + (tbl.mode === m ? ' primary' : ''), onclick: () => { tbl.mode = m; tbl.k = null; renderTbl(); } }, n)))));
+    if (tbl.mode === 'list') {
+      v.append(math(h('div', { class: 'cards-grid' }, Formulas.F.map((f, k) => h('div', { class: 'panel card' }, h('h2', {}, h('span', { class: 'tag' }, String(k + 1)), fMastered(k) ? h('span', { class: 'mastered' }, '✓') : ''), h('div', { class: 'formula', html: fTex(k) }))))));
+    } else {
+      if (tbl.k == null) tbl.k = pickFormula();
+      const k = tbl.k;
+      v.append(h('div', { class: 'panel' }, formulaQ(k, null, () => { tbl.k = pickFormula(k); renderTbl(); })));
+    }
+    v.append(h('div', { class: 'panel' }, h('h3', {}, 'Your formulas'), formulaTable()));
   }
 
   // ---------- step widget ----------
@@ -115,23 +212,32 @@
     const a = $('#type-list'); a.innerHTML = '';
     const panel = h('div', { class: 'panel' });
     panel.append(h('button', { class: 'type-btn' + (!practice.sel ? ' sel' : ''), onclick: () => { practice.sel = null; practice.p = null; renderPractice(); } }, h('b', {}, 'Smart: weak spots first'), ''));
+    const btn = (id, name) => h('button', { class: 'type-btn' + (practice.sel && practice.sel.length === 1 && practice.sel[0] === id ? ' sel' : ''), onclick: () => { practice.sel = [id]; practice.p = null; renderPractice(); } }, h('span', {}, name), dots(id));
+    panel.append(h('h3', {}, 'Table 8.1 (memorize)'), btn('tbl', 'Basic integration formulas'));
     let sec = '';
-    for (const t of Gen.TYPES) {
+    for (const t of ON_TEST) {
       if (t.sec !== sec) { sec = t.sec; panel.append(h('h3', {}, t.head || sec)); }
-      const sel = practice.sel && practice.sel.length === 1 && practice.sel[0] === t.id;
-      panel.append(h('button', { class: 'type-btn' + (sel ? ' sel' : ''), onclick: () => { practice.sel = [t.id]; practice.p = null; renderPractice(); } }, h('span', {}, t.name), dots(t.id)));
+      panel.append(btn(t.id, t.name));
     }
+    const offT = Gen.TYPES.filter(t => t.off);
+    panel.append(h('details', { class: 'not-on-test', open: offT.some(t => practice.sel && practice.sel.includes(t.id)) ? '' : false }, h('summary', {}, 'Not on the test'), offT.map(t => btn(t.id, t.name))));
     a.append(panel);
   }
   function nextProblem() {
     const id = practice.sel && practice.sel.length === 1 ? practice.sel[0] : smartType(practice.sel, practice.p && practice.p.type);
-    practice.p = Gen.make(id, newSeed());
+    practice.p = id === 'tbl' ? { type: 'tbl', k: pickFormula(practice.p && practice.p.k) } : Gen.make(id, newSeed());
     practice.idx = 0; practice.missed = new Set(); practice.recorded = false;
   }
   function renderPractice() {
     renderTypeList();
     if (!practice.p) nextProblem();
     const p = practice.p, m = $('#practice-main'); m.innerHTML = '';
+    if (p.type === 'tbl') {
+      const sub = practice.sel ? '' : 'smart pick';
+      m.append(h('div', { class: 'panel' }, h('div', {}, h('span', { class: 'tag' }, 'Table 8.1'), h('b', {}, 'Basic integration formulas'), ' ', dots('tbl'), sub ? h('span', { class: 'help' }, '  · ' + sub) : null),
+        formulaQ(p.k, renderTypeList, () => { nextProblem(); renderPractice(); })));
+      return;
+    }
     const card = CARDS.find(c => c.id === p.card);
     const cardBox = h('div', { class: 'inline-card', hidden: true });
     const sub = practice.sel ? (practice.sel.length === 1 ? '' : 'card set') : 'smart pick';
@@ -237,7 +343,7 @@
   // ---------- practice test ----------
   const pick = a => a[Math.floor(Math.random() * a.length)];
   function buildTest() {
-    const ids = ['disp-dist', pick(['pos-v', 'pos-a']), pick(['area-x', 'area-y', 'area-split']), pick(['washer-x', 'washer-y', 'washer-h', 'washer-v', 'slice']), pick(['shell-y', 'shell-x', 'shell-v', 'shell-h']), 'both', pick(['arc-x', 'arc-x', 'arc-y']), 'spring', pick(['pump', 'force']), pick(['chain', 'chain', 'mass'])];
+    const ids = ['disp-dist', pick(['pos-v', 'pos-a']), pick(['area-x', 'area-y', 'area-split']), pick(['washer-x', 'washer-y', 'washer-h', 'washer-v', 'slice']), pick(['shell-y', 'shell-x', 'shell-v', 'shell-h']), 'both', pick(['arc-x', 'arc-x', 'arc-y']), 'pump', 'pump'];
     return ids.map(type => ({ type, seed: newSeed() }));
   }
   let tick = null;
@@ -249,7 +355,7 @@
       stopTimer();
       const mins = h('input', { type: 'number', min: 10, max: 180, value: 50, style: 'width:80px' });
       v.append(math(h('div', { class: 'panel' }, h('h2', {}, 'Mixed practice test'),
-        h('p', {}, 'Ten problems covering 6.1, 6.2, 6.3-6.4 (disk/washer, shell, set up both ways), 6.5 and 6.7, generated fresh each time. Enter every step like on paper; nothing is checked until you submit. Then you get your score, the exact mistake on each wrong step, and full worked solutions.'),
+        h('p', {}, 'Nine problems covering 6.1, 6.2, 6.3-6.4 (disk/washer, shell, set up both ways), 6.5 and 6.7 pumping, generated fresh each time. Enter every step like on paper; nothing is checked until you submit. Then you get your score, the exact mistake on each wrong step, and full worked solutions.'),
         h('p', {}, 'Time limit (minutes): ', mins, ' ', h('button', { class: 'btn primary', onclick: () => { store.test = { items: buildTest(), answers: {}, end: Date.now() + Math.max(1, +mins.value || 50) * 60000, submitted: false }; save(); renderTest(); } }, 'Start test')))));
       return;
     }
@@ -302,21 +408,27 @@
   // ---------- dashboard ----------
   function renderDash() {
     const v = $('#view-dash'); v.innerHTML = '';
-    const total = Gen.TYPES.length, nm = Gen.TYPES.filter(t => mastered(t.id)).length;
+    const total = SMART_IDS.length, nm = SMART_IDS.filter(mastered).length;
     v.append(h('div', { class: 'panel' }, h('div', { class: 'score' }, `${nm} / ${total} problem types mastered`), h('p', { class: 'help' }, 'Mastered = solved cleanly (no wrong step, no "Show") 3 times in a row. Any miss resets the streak and Smart practice serves that type again.'),
       h('div', { class: 'bar' }, h('i', { style: `width:${100 * nm / total}%` }))));
-    const rows = Gen.TYPES.map(t => {
+    const fRow = (() => {
+      const ss = Formulas.F.map((f, k) => store.formulas[k] || { att: 0, right: 0 }), att = ss.reduce((a, s) => a + s.att, 0), right = ss.reduce((a, s) => a + s.right, 0);
+      const worst = ss.map((s, k) => [k, s.att - s.right]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `#${k + 1} (${n})`).join(', ');
+      return h('tr', {}, h('td', {}, '8.1'), h('td', {}, h('a', { href: '#', onclick: e => { e.preventDefault(); show('tbl'); } }, 'Basic integration formulas (Table 8.1)')), h('td', {}, dots('tbl')), h('td', {}, String(att)), h('td', {}, att ? Math.round(100 * right / att) + '%' : '—'), h('td', {}, worst || '—'));
+    })();
+    const rows = [fRow, ...ON_TEST.map(t => {
       const s = store.types[t.id] || { att: 0, clean: 0, streak: 0, miss: {} };
       const worst = Object.entries(s.miss).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${stepName(k)} (${n})`).join(', ');
       return h('tr', {}, h('td', {}, t.sec), h('td', {}, h('a', { href: '#', onclick: e => { e.preventDefault(); practice.sel = [t.id]; practice.p = null; show('practice'); } }, t.name)), h('td', {}, dots(t.id)), h('td', {}, String(s.att)), h('td', {}, s.att ? Math.round(100 * s.clean / s.att) + '%' : '—'), h('td', {}, worst || '—'));
-    });
+    })];
     v.append(h('div', { class: 'panel' }, h('h3', {}, 'Problem types'), h('table', {}, h('tr', {}, h('th', {}, 'Sec'), h('th', {}, 'Type'), h('th', {}, 'Streak'), h('th', {}, 'Tries'), h('th', {}, 'Clean'), h('th', {}, 'Most-missed steps')), rows)));
+    v.append(h('div', { class: 'panel' }, h('h3', {}, `Table 8.1 formulas: ${fCount()} / ${FN} mastered`), formulaTable()));
     const hist = (store.testHistory || []).slice(-10).reverse();
     v.append(h('div', { class: 'panel' }, h('h3', {}, 'Practice tests'), hist.length ? h('table', {}, h('tr', {}, h('th', {}, 'When'), h('th', {}, 'Steps'), h('th', {}, 'Final answers')), hist.map(x => h('tr', {}, h('td', {}, new Date(x.when).toLocaleString()), h('td', {}, `${x.steps}/${x.of} (${Math.round(100 * x.steps / x.of)}%)`), h('td', {}, `${x.finals}/${x.finalsOf}`)))) : h('p', { class: 'help' }, 'No tests taken yet.')));
     const dpanel = h('div', { class: 'panel', id: 'drill-stats' }); v.append(h('h3', {}, 'Which-method drill'), dpanel); renderDrillStats();
     v.append(h('p', {}, h('button', { class: 'btn', onclick: () => { if (confirm('Erase all progress?')) { localStorage.removeItem(KEY); location.reload(); } } }, 'Reset all progress')));
   }
 
-  window.__state = { practice, drill, store };
+  window.__state = { practice, drill, store, tbl };
   show(store.test && !store.test.submitted ? 'test' : views.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'practice');
 })();

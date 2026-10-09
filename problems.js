@@ -1256,11 +1256,11 @@
     { id: 'sh-trap', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: trapezoid ends', card: 'sh-trap', gen: r => flatTrough(r, 'trap') },
     { id: 'sh-semi', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: semicircle ends', card: 'sh-semi', gen: r => roundTrough(r, 'semi') },
     { id: 'sh-para', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: parabola ends', card: 'sh-para', gen: shPara },
-    { id: 'spring', sec: '6.7', name: 'Work: springs', card: 'spring', gen: spring },
-    { id: 'chain', sec: '6.7', name: 'Work: lifting chains/ropes', card: 'chain', gen: chain },
+    { id: 'spring', sec: '6.7', off: true, name: 'Work: springs', card: 'spring', gen: spring },
+    { id: 'chain', sec: '6.7', off: true, name: 'Work: lifting chains/ropes', card: 'chain', gen: chain },
     { id: 'pump', sec: '6.7', name: 'Work: pumping liquids', card: 'pump', gen: pump },
-    { id: 'force', sec: '6.7', name: 'Force & pressure on a plate', card: 'force', gen: force },
-    { id: 'mass', sec: '6.7', name: 'Mass of a thin bar', card: 'mass', gen: mass },
+    { id: 'force', sec: '6.7', off: true, name: 'Force & pressure on a plate', card: 'force', gen: force },
+    { id: 'mass', sec: '6.7', off: true, name: 'Mass of a thin bar', card: 'mass', gen: mass },
     { id: 'hw', sec: 'HW', name: 'Assigned homework (exact book problems)', card: 'shell', gen: homework },
   ];
   const byId = Object.fromEntries(TYPES.map(t => [t.id, t]));
