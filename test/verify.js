@@ -107,7 +107,7 @@ function verifyProblem(p) {
   }
   if (p.region) verifyRegion(p, p.region);
   // Volume radius / height sanity: positive on the interval.
-  for (const id of ['R', 'r', 'radius', 'height', 'lift', 'depth', 'w', 'A', 'side']) {
+  for (const id of ['R', 'r', 'radius', 'height', 'lift', 'depth', 'w', 'A', 'side', 'len', 'rad', 'half', 'wid']) {
     const s = stepById[id]; if (!s) continue;
     for (const x of Check.samples(s.lo, s.hi, 7)) ok(Check.evalNum(s.ans, scope(s.v, x)) >= -1e-12, p, `${id} negative at ${x}`);
   }
@@ -132,6 +132,15 @@ function verifyProblem(p) {
     for (let i = 1; i <= n; i++) { const y = o.g(o.a + i * h); L += Math.hypot(h, y - py); py = y; }
     ok(rel(I, L, 1e-5), p, `setup integral ${I} != polyline length ${L}`);
   }
+  // Shapes: the width/radius and A(y) steps agree with plain-geometry closures at every sample height.
+  if (p.shape) {
+    const sh = p.shape, unk = p.steps[0];
+    for (const y of Check.samples(sh.lo, sh.hi, 9)) {
+      ok(rel(Check.evalNum(unk.ans, { y }), sh.unk(y), 1e-9), p, `${unk.id} step ${unk.ans} != geometry at y=${y}`);
+      ok(rel(Check.evalNum(stepById.A.ans, { y }), sh.A(y), 1e-9), p, `A step ${stepById.A.ans} != geometry at y=${y}`);
+    }
+    ok(rel(Check.evalNum(stepById.A.ans, { y: sh.y0 }), p.value, 1e-9), p, 'A(y) step at y0 != final answer');
+  }
   if (p.meta && stepById.s) ok(rel(Check.evalNum(stepById.s.ans, { t: p.meta.T }), p.value, 1e-9) && rel(Check.evalNum(stepById.s.ans, { t: 0 }), p.meta.s0, 1e-9), p, 's(t) step inconsistent with final or s(0)');
   if (p.meta && stepById.v && stepById.s) {
     for (const t of Check.samples(0, p.meta.T, 5)) ok(rel(numDeriv(x => Check.evalNum(stepById.s.ans, { t: x }), t), Check.evalNum(stepById.v.ans, { t }), 1e-5), p, "s' != v");
@@ -142,7 +151,8 @@ function verifyProblem(p) {
 // ("19.6 \times 450 = 8820", "-8\cdot 36 + 96\cdot 6 = -288 + 576") must be equal, and the solution
 // must arrive at the answer key. Sides with letters (F(6), x^2, \sqrt, \approx, ...) are skipped.
 function numSide(s) {
-  let e = s.replace(/(\\ )*\\text\{(?! cm)[^{}]*\}\s*$/, '').replace(/\\text\{[^{}]*\}/g, 'T') // trailing unit dropped; a named function like \text{top}(4) is not a number.replace(/\\left|\\right|\\big|\\Big|\\[,;!]|\\ |\\quad|\\qquad/g, ' ');
+  // trailing unit dropped; a named function like \text{top}(4) is not a number
+  let e = s.replace(/(\\ )*\\text\{(?! cm)[^{}]*\}\s*$/, '').replace(/\\text\{[^{}]*\}/g, 'T').replace(/\\left|\\right|\\big|\\Big|\\[,;!]|\\ |\\quad|\\qquad/g, ' ');
   e = e.replace(/\\sqrt\{([^{}]*)\}/g, '(($1)**0.5)').replace(/\\sqrt\s*(\d+)/g, '($1**0.5)');
   for (let k = 0; k < 4; k++) e = e.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))');
   e = e.replace(/\\pi/g, '(PI)').replace(/\\times|\\cdot/g, '*').replace(/\\div/g, '/').replace(/\^\{([^{}]*)\}/g, '**($1)').replace(/\^/g, '**').replace(/[{}]/g, m => m === '{' ? '(' : ')');

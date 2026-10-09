@@ -115,6 +115,8 @@
   const tpow = (x, p) => p.eq(1) ? tqp(x) : p.eq(new Q(1, 2)) ? `\\sqrt{${tq(x)}}` : `(${tq(x)})^{${tq(p)}}`;
   const termT = (c, p, v) => (c.n < 0 ? '-' : '') + T(new GP([{ p, c: c.n < 0 ? c.neg() : c }]).str(v));
   const gpT = (g, v) => jn(g.t.map(t => termT(t.c, t.p, v)));
+  const gpA = (g, v) => jn([...g.t].reverse().map(t => termT(t.c, t.p, v))); // lowest power first: 3 - y
+  const piT = x => x.eq(1) ? '\\pi' : x.d === 1 ? `${x.n}\\pi` : `\\frac{${x.n}\\pi}{${x.d}}`;
   const gpP = (g, v) => g.t.length > 1 || (g.t[0] && g.t[0].c.n < 0) ? `\\left(${gpT(g, v)}\\right)` : gpT(g, v);
   // a1 + a2 + ... : common denominator, then the result
   function sumStages(qs) {
@@ -154,9 +156,9 @@
     return eqs([l.startsWith('\\left') && r.startsWith('\\left') ? l + r : `${l}\\cdot ${r}`, jn(pairs), gpT(A.mul(B), v)]);
   }
   // ∫ G dv term by term with the power rule
-  function antiLine(G, v) {
-    const parts = G.t.map(t => { const p1 = t.p.add(1); const c = t.c.eq(1) ? '' : t.c.eq(-1) ? '-' : `${tq(t.c)}\\cdot `; return `${c}\\frac{${v}^{${p1.eq(1) ? '1' : tq(p1)}}}{${tq(p1)}}`; });
-    return `\\int ${gpP(G, v)}\\,d${v} = ${eqs([jn(parts), gpT(G.integ(), v)])}`;
+  function antiLine(G, v, asc) {
+    const parts = (asc ? [...G.t].reverse() : G.t).map(t => { const p1 = t.p.add(1); const c = t.c.eq(1) ? '' : t.c.eq(-1) ? '-' : `${tq(t.c)}\\cdot `; return `${c}\\frac{${v}^{${p1.eq(1) ? '1' : tq(p1)}}}{${tq(p1)}}`; });
+    return `\\int ${asc ? `\\left(${gpA(G, v)}\\right)` : gpP(G, v)}\\,d${v} = ${eqs([jn(parts), (asc ? gpA : gpT)(G.integ(), v)])}`;
   }
   // derivative term by term: d/dv (c v^p) = c·p v^(p-1)
   const derivLine = (f, v) => eqs([jn(f.t.map(t => t.p.isZero() ? '0' : `${tq(t.c)}\\cdot ${tqp(t.p)}\\,${v}^{${tq(t.p.sub(1))}}`)), gpT(f.deriv(), v)]);
@@ -189,8 +191,8 @@
 
   // Standard integrate-and-evaluate steps + solution lines for factor * ∫_a^b G dv, G a GP.
   function integralSteps(o) {
-    const { G, v, a, b, factor = '', factorQ = q(1), pi = false, what, unit = '', sym = 'V', anti = 'F', dec = false } = o;
-    const F = G.integ(), Fb = F.at(b), Fa = F.at(a), val = Fb.sub(Fa).mul(factorQ);
+    const { G, v, a, b, factor = '', factorQ = q(1), pi = false, what, unit = '', sym = 'V', anti = 'F', dec = false, asc = false } = o;
+    const F = G.integ(), Fb = F.at(b), Fa = F.at(a), val = Fb.sub(Fa).mul(factorQ), Fd = asc ? { t: [...F.t].reverse() } : F;
     const lo = Math.min(a.v, b.v), hi = Math.max(a.v, b.v);
     const ans = exactPi(val, pi);
     const bare = exactPi(Fb.sub(Fa), false);
@@ -207,11 +209,11 @@
     const D = Fb.sub(Fa), u = unit ? '\\ \\text{' + unit + '}' : '';
     const work = [
       `$$\\int_a^b (\\text{integrand})\\,d${v} = ${anti}(b) - ${anti}(a)$$`,
-      `$$${sym} = ${pre}\\int_{${tq(a)}}^{${tq(b)}} \\left(${gpT(G, v)}\\right) d${v} = ${pre}\\Big[${anti}(${v})\\Big]_{${tq(a)}}^{${tq(b)}} = ${pre}\\big(${anti}(${tq(b)}) - ${anti}(${tq(a)})\\big)$$`,
+      `$$${sym} = ${pre}\\int_{${tq(a)}}^{${tq(b)}} \\left(${(asc ? gpA : gpT)(G, v)}\\right) d${v} = ${pre}\\Big[${anti}(${v})\\Big]_{${tq(a)}}^{${tq(b)}} = ${pre}\\big(${anti}(${tq(b)}) - ${anti}(${tq(a)})\\big)$$`,
       `Antiderivative, one term at a time (power rule \\(\\int ${v}^n\\,d${v} = \\frac{${v}^{n+1}}{n+1}\\)):`,
-      `$$${anti}(${v}) = ${antiLine(G, v)}$$`,
+      `$$${anti}(${v}) = ${antiLine(G, v, asc)}$$`,
       `Plug in the top bound, then the bottom bound:`,
-      `$$${evalAt(F, b, anti)}$$`, `$$${evalAt(F, a, anti)}$$`,
+      `$$${evalAt(Fd, b, anti)}$$`, `$$${evalAt(Fd, a, anti)}$$`,
       `$$${diffLine(Fb, Fa, b, a, anti)}$$`,
     ];
     const ansT = dec ? `${dn(val)}${pi ? '\\pi' : ''}` : T(ans); // T() turns 117600 into 1.176e5
@@ -848,12 +850,12 @@
     const us = r.next() < 0.25;
     const wd = us ? q(125, 2) : q(9800); // weight density: 62.5 lb/ft^3 or 1000*9.8 N/m^3
     const u = us ? 'ft' : 'm';
-    let A, H, desc, Atex, raw, areaMistakes = [], isPi = false, areaWork;
-    if (shape === 'cyl') { const rad = r.pick([1, 2, 3, 4]); H = r.pick([2, 4, 5, 6, 8]); A = GP.k(rad * rad); isPi = true; desc = `A cylindrical tank (standing upright) has radius ${rad} ${u} and height ${H} ${u}`; raw = y => Math.PI * rad * rad; areaWork = ['\\(r\\) = radius.', 'A(y) = \\pi r^2', `A(y) = \\pi\\cdot ${rad}^2 = ${rad * rad === 1 ? '' : rad * rad}\\pi`]; }
-    else if (shape === 'box') { const l = r.pick([2, 3, 4, 5]), w = r.pick([2, 3, 4]); H = r.pick([2, 3, 4, 5]); A = GP.k(l * w); desc = `A rectangular tank has a base ${l} ${u} by ${w} ${u} and height ${H} ${u}`; raw = () => l * w; areaWork = ['A(y) = \\text{length}\\times\\text{width}', `A(y) = ${l}\\times ${w} = ${l * w}`]; }
-    else if (shape === 'cone') { const R0 = r.pick([1, 2, 3, 4]); H = r.pick([2, 3, 4, 6]); A = GP.x(2, new Q(R0 * R0, H * H)); isPi = true; desc = `A conical tank with its vertex pointing down has radius ${R0} ${u} at the top and height ${H} ${u}`; raw = y => Math.PI * (R0 * y / H) ** 2; areaWork = ['Similar triangles: \\(r\\) = slice radius at height \\(y\\), \\(R\\) = top radius, \\(H\\) = height.', '\\frac{r}{y} = \\frac{R}{H} \\;\\Rightarrow\\; r = \\frac{R}{H}\\,y', `\\frac{r}{y} = \\frac{${R0}}{${H}} \\;\\Rightarrow\\; r = ${eqs([`\\frac{${R0}}{${H}}\\,y`, ty(new Q(R0, H), 'y')])}`, 'A(y) = \\pi r^2 = \\pi\\left(\\frac{R}{H}\\,y\\right)^2', `A(y) = \\pi\\left(\\frac{${R0}}{${H}}y\\right)^2 = \\pi\\cdot\\frac{${R0}^2}{${H}^2}y^2 = \\pi\\cdot\\frac{${R0 * R0}}{${H * H}}y^2`]; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The radius shrinks toward the vertex: by similar triangles r(y) = (${R0}/${H})y, so A = π r² uses that.` }]; }
-    else if (shape === 'trough') { const len = r.pick([4, 5, 6, 10]), w = r.pick([2, 3, 4]); H = r.pick([1, 2, 3]); A = GP.x(1, new Q(len * w, H)); desc = `A trough ${len} ${u} long has cross-sections that are isosceles triangles (vertex down) ${w} ${u} wide at the top and ${H} ${u} tall`; raw = y => len * w * y / H; areaWork = ['Similar triangles: \\(w\\) = slice width at height \\(y\\), \\(b\\) = top width, \\(H\\) = height, \\(\\ell\\) = length.', '\\frac{w}{y} = \\frac{b}{H} \\;\\Rightarrow\\; w = \\frac{b}{H}\\,y', `\\frac{w}{y} = \\frac{${w}}{${H}} \\;\\Rightarrow\\; w = ${eqs([`\\frac{${w}}{${H}}\\,y`, ty(new Q(w, H), 'y')])}`, 'A(y) = \\ell\\cdot w = \\ell\\cdot\\frac{b}{H}\\,y', `A(y) = ${len}\\cdot\\frac{${w}}{${H}}y = \\frac{${len}\\cdot ${w}}{${H}}y = \\frac{${len * w}}{${H}}y`]; areaMistakes = [{ ans: `${len * w}`, msg: `The width shrinks toward the bottom: w(y) = (${w}/${H})y, so A(y) = ${len}·w(y).` }]; }
-    else { const R0 = r.pick([1, 2, 3, 4]); H = R0; A = GP.poly(-1, 2 * R0, 0); isPi = true; desc = `A hemispherical bowl (flat side up) has radius ${R0} ${u}`; raw = y => Math.PI * (R0 * R0 - (R0 - y) ** 2); areaWork = [`Pythagoras: \\(r\\) = slice radius at height \\(y\\), \\(R\\) = bowl radius; the center is at \\(y = R = ${R0}\\).`, 'r^2 = R^2 - (R - y)^2', `r^2 = ${R0}^2 - (${R0} - y)^2 = ${R0 * R0} - (${R0 * R0} - ${2 * R0}y + y^2) = ${2 * R0}y - y^2`, 'A(y) = \\pi r^2', `A(y) = \\pi(${2 * R0}y - y^2)`]; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The circle radius depends on height: r² = ${R0}² − (${R0} − y)².` }]; }
+    let A, H, desc, AT, In, raw, areaMistakes = [], isPi = false, areaWork;
+    if (shape === 'cyl') { const rad = r.pick([1, 2, 3, 4]); H = r.pick([2, 4, 5, 6, 8]); A = GP.k(rad * rad); isPi = true; AT = piT(q(rad * rad)); desc = `A cylindrical tank (standing upright) has radius ${rad} ${u} and height ${H} ${u}`; raw = y => Math.PI * rad * rad; areaWork = ['\\(r\\) = radius.', 'A(y) = \\pi r^2', `A(y) = \\pi\\cdot ${rad}^2 = ${rad * rad === 1 ? '' : rad * rad}\\pi`]; }
+    else if (shape === 'box') { const l = r.pick([2, 3, 4, 5]), w = r.pick([2, 3, 4]); H = r.pick([2, 3, 4, 5]); A = GP.k(l * w); AT = `${l * w}`; desc = `A rectangular tank has a base ${l} ${u} by ${w} ${u} and height ${H} ${u}`; raw = () => l * w; areaWork = ['A(y) = \\text{length}\\times\\text{width}', `A(y) = ${l}\\times ${w} = ${l * w}`]; }
+    else if (shape === 'cone') { const R0 = r.pick([1, 2, 3, 4]); H = r.pick([2, 3, 4, 6]); A = GP.x(2, new Q(R0 * R0, H * H)); isPi = true; In = ty(new Q(R0 * R0, H * H), 'y^2'); AT = ty(new Q(R0 * R0, H * H), '\\pi y^2'); desc = `A conical tank with its vertex pointing down has radius ${R0} ${u} at the top and height ${H} ${u}`; raw = y => Math.PI * (R0 * y / H) ** 2; areaWork = ['Similar triangles: \\(r\\) = slice radius at height \\(y\\), \\(R\\) = top radius, \\(H\\) = height.', '\\frac{r}{y} = \\frac{R}{H} \\;\\Rightarrow\\; r = \\frac{R}{H}\\,y', `\\frac{r}{y} = \\frac{${R0}}{${H}} \\;\\Rightarrow\\; r = ${eqs([`\\frac{${R0}}{${H}}\\,y`, ty(new Q(R0, H), 'y')])}`, 'A(y) = \\pi r^2 = \\pi\\left(\\frac{R}{H}\\,y\\right)^2', `A(y) = \\pi\\left(\\frac{${R0}}{${H}}y\\right)^2 = \\pi\\cdot\\frac{${R0}^2}{${H}^2}y^2 = \\pi\\cdot\\frac{${R0 * R0}}{${H * H}}y^2`]; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The radius shrinks toward the vertex: by similar triangles r(y) = (${R0}/${H})y, so A = π r² uses that.` }]; }
+    else if (shape === 'trough') { const len = r.pick([4, 5, 6, 10]), w = r.pick([2, 3, 4]); H = r.pick([1, 2, 3]); A = GP.x(1, new Q(len * w, H)); In = AT = ty(new Q(len * w, H), 'y'); desc = `A trough ${len} ${u} long has cross-sections that are isosceles triangles (vertex down) ${w} ${u} wide at the top and ${H} ${u} tall`; raw = y => len * w * y / H; areaWork = ['Similar triangles: \\(w\\) = slice width at height \\(y\\), \\(b\\) = top width, \\(H\\) = height, \\(\\ell\\) = length.', '\\frac{w}{y} = \\frac{b}{H} \\;\\Rightarrow\\; w = \\frac{b}{H}\\,y', `\\frac{w}{y} = \\frac{${w}}{${H}} \\;\\Rightarrow\\; w = ${eqs([`\\frac{${w}}{${H}}\\,y`, ty(new Q(w, H), 'y')])}`, 'A(y) = \\ell\\cdot w = \\ell\\cdot\\frac{b}{H}\\,y', `A(y) = ${len}\\cdot\\frac{${w}}{${H}}y = \\frac{${len}\\cdot ${w}}{${H}}y = \\frac{${len * w}}{${H}}y`]; areaMistakes = [{ ans: `${len * w}`, msg: `The width shrinks toward the bottom: w(y) = (${w}/${H})y, so A(y) = ${len}·w(y).` }]; }
+    else { const R0 = r.pick([1, 2, 3, 4]); H = R0; A = GP.poly(-1, 2 * R0, 0); isPi = true; In = `(${2 * R0}y - y^2)`; AT = `\\pi${In}`; desc = `A hemispherical bowl (flat side up) has radius ${R0} ${u}`; raw = y => Math.PI * (R0 * R0 - (R0 - y) ** 2); areaWork = [`Pythagoras: \\(r\\) = slice radius at height \\(y\\), \\(R\\) = bowl radius; the center is at \\(y = R = ${R0}\\).`, 'r^2 = R^2 - (R - y)^2', `r^2 = ${R0}^2 - (${R0} - y)^2 = ${R0 * R0} - (${R0 * R0} - ${2 * R0}y + y^2) = ${2 * R0}y - y^2`, 'A(y) = \\pi r^2', `A(y) = \\pi(${2 * R0}y - y^2)`]; areaMistakes = [{ ans: `${R0 * R0}`, msg: `The circle radius depends on height: r² = ${R0}² − (${R0} − y)².` }]; }
     const depthFrac = r.pick([1, 1, new Q(1, 2)]), D = q(H).mul(depthFrac);
     const out = r.pick([0, 0, 1, 2]);
     const top = H + out;
@@ -861,12 +863,12 @@
     const Gint = A.mul(lift);
     const filled = depthFrac === 1 || (depthFrac.eq && depthFrac.eq(1)) ? 'is full of water' : `is filled with water to a depth of ${D.v} ${u}`;
     const dest = out ? `to an outlet ${out} ${u} above the top of the tank` : 'out over the top of the tank';
-    const Aexpr = isPi ? `pi * (${A.str('y')})` : A.str('y');
+    const Aexpr = isPi ? `pi * (${A.str('y')})` : A.str('y'), wdT = us ? '62.5' : '9800';
     const F = Gint.integ(), raw0 = F.at(D).sub(F.at(0)), val = raw0.mul(wd);
     const ans = isPi ? exactPi(val, true) : val.str();
     const steps = [
       { id: 'A', label: `Cross-sectional area \\(A(y)\\) of a horizontal slice at height \\(y\\) (from the bottom)`, kind: 'expr', v: 'y', lo: 0, hi: H, ans: Aexpr, mistakes: areaMistakes.map(m => ({ ...m, ans: isPi ? `pi * ${m.ans}` : m.ans })).concat(isPi ? [{ ans: A.str('y'), msg: 'A circle\'s area is πr²: include π.' }] : []), hint: 'Slice horizontally; area of that slice as a function of its height y.' },
-      { id: 'lift', label: `Distance the slice at height \\(y\\) must be lifted`, kind: 'expr', v: 'y', lo: 0, hi: H, ans: lift.str('y'), mistakes: [{ ans: 'y', msg: `y is how high the slice already is. It must rise to ${top}: distance = ${top} − y.` }, ...(out ? [{ ans: GP.poly(-1, H).str('y'), msg: `The water goes to the outlet ${out} ${u} above the top, so it rises to ${top}, not ${H}.` }] : [])], hint: `It must reach height ${top}.` },
+      { id: 'lift', label: `Distance the slice at height \\(y\\) must be lifted`, kind: 'expr', v: 'y', lo: 0, hi: H, ans: `${top} - y`, mistakes: [{ ans: 'y', msg: `y is how high the slice already is. It must rise to ${top}: distance = ${top} − y.` }, ...(out ? [{ ans: GP.poly(-1, H).str('y'), msg: `The water goes to the outlet ${out} ${u} above the top, so it rises to ${top}, not ${H}.` }] : [])], hint: `It must reach height ${top}.` },
       { id: 'a', label: 'Lower limit (y)', kind: 'num', ans: '0', hint: 'Bottom of the water.' },
       { id: 'b', label: 'Upper limit (y)', kind: 'num', ans: D.str(), mistakes: D.eq(H) ? [] : [{ ans: `${H}`, msg: `Only the water moves: it goes up to ${D.v}, not the tank height.` }], hint: 'Top of the water surface.' },
       { id: 'final', label: `Work (${us ? 'ft·lb' : 'J'})`, kind: 'num', ans: ans, mistakes: [{ ans: isPi ? exactPi(raw0, true) : raw0.str(), msg: `Multiply by the weight density ${us ? '62.5 lb/ft³' : 'ρg = 1000·9.8 = 9800 N/m³'}.` }, ...(us ? [] : [{ ans: isPi ? exactPi(raw0.mul(1000), true) : raw0.mul(1000).str(), msg: 'Mass is not weight: use ρg = 9800, not ρ = 1000.' }])], hint: `W = ${us ? '62.5' : '9800'}∫ A(y)·(lift) dy.` },
@@ -879,9 +881,13 @@
         `The water must reach height \\(${out ? `${H} + ${out} = ${top}` : top}\\), so a slice at height \\(y\\) is lifted \\(${top} - y\\):`,
         '$$D(y) = (\\text{height it must reach}) - y$$', `$$D(y) = ${top} - y$$`,
         `The water runs from \\(y = 0\\) to \\(y = ${depthFrac === 1 ? H : `\\frac{1}{2}\\cdot ${H} = ${dn(D)}`}\\). Each slice: weight \\(${us ? '62.5' : '9800'}\\,A(y)\\,dy\\) times distance lifted.`,
-        `$$W = \\int_a^b \\rho g\\,A(y)\\,D(y)\\,dy$$`, `$$W = \\int_0^{${dn(D)}} ${us ? '62.5' : '9800'}\\left(${T(Aexpr)}\\right)(${top} - y)\\,dy$$`,
-        `${isPi ? 'Pull \\(\\pi\\) out front, then multiply' : 'Multiply'} area by lift, every term: $$${mulGP(A, lift, 'y')}$$`,
-        ...integralSteps({ G: Gint, v: 'y', a: q(0), b: D, factor: (us ? '62.5' : '9800') + (isPi ? '\\pi' : ''), factorQ: wd, pi: isPi, what: 'W', unit: us ? 'ft·lb' : 'J', sym: 'W', dec: true }).work],
+        `$$W = \\int_a^b \\rho g\\,A(y)\\,D(y)\\,dy$$`, `$$W = \\int_0^{${dn(D)}} ${wdT}\\cdot ${AT}\\cdot (${top} - y)\\,dy$$`,
+        ...(A.t[0].p.isZero() ? (() => { const K = wd.mul(A.t[0].c), KT = `${dn(K)}${isPi ? '\\pi' : ''}`; // constant area: it comes out front with rho g
+          return [`Pull the constants out front: \\(${wdT}\\cdot ${AT}\\).`, ...(A.t[0].c.eq(1) ? [] : [`$$${wdT}\\times ${dn(A.t[0].c)} = ${dn(K)}$$`]), `$$W = ${wdT}\\cdot ${AT}\\int_0^{${dn(D)}} (${top} - y)\\,dy = ${KT}\\int_0^{${dn(D)}} (${top} - y)\\,dy$$`,
+            ...integralSteps({ G: lift, v: 'y', a: q(0), b: D, factor: KT, factorQ: K, pi: isPi, what: 'W', unit: us ? 'ft·lb' : 'J', sym: 'W', dec: true, asc: true }).work]; })()
+        : [`Pull the constants out front (\\(${wdT}\\)${isPi ? ' and \\(\\pi\\)' : ''}):`, `$$W = ${wdT}${isPi ? '\\pi' : ''}\\int_0^{${dn(D)}} ${In}\\,(${top} - y)\\,dy$$`,
+          `Multiply out, every term: $$${eqs([`${In}\\,(${top} - y)`, jn(A.t.flatMap(t => [termT(t.c.mul(top), t.p, 'y'), termT(t.c.neg(), t.p.add(1), 'y')])), gpA(Gint, 'y')])}$$`,
+          ...integralSteps({ G: Gint, v: 'y', a: q(0), b: D, factor: wdT + (isPi ? '\\pi' : ''), factorQ: wd, pi: isPi, what: 'W', unit: us ? 'ft·lb' : 'J', sym: 'W', dec: true, asc: true }).work])],
       truth: () => { const n = 20000, h = D.v / n; let s = 0; for (let i = 0; i < n; i++) { const y = (i + 0.5) * h; s += wd.v * raw(y) * h * (top - y); } return s; },
     });
   }
@@ -933,6 +939,233 @@
       solution: [`Mass is density integrated along the bar, from \\(x = 0\\) to \\(x = ${L}\\):`, '$$m = \\int_a^b \\rho(x)\\,dx$$',
         ...integralSteps({ G: rho, v: 'x', a: q(0), b: q(L), what: 'm', unit: 'kg', sym: 'm' }).work],
       truth: () => Check.simpson(x => rho.num(x), 0, L, 200) });
+  }
+
+  // ---------- shapes: width, radius and area of a horizontal slice at height y ----------
+  // Every problem: what you know -> the equation it gives (letters, then numbers) -> solve for the unknown
+  // -> A(y) -> A at one height. p.shape holds plain-geometry closures that test/verify.js checks the steps against.
+  const about = (tex, val) => `,\\qquad ${tex} \\approx ${fmt(val)}`;
+  const rev = g => ({ t: [...g.t].reverse() }); // evalAt lowest power first
+  const ascS = (g, v) => [...g.t].reverse().map((t, i) => { const s = new GP([t]).str(v); return i === 0 ? s : s.startsWith('-') ? ' - ' + s.slice(1) : ' + ' + s; }).join('');
+  const plain = s => s.replace(/\s+\*\s+/g, '').replace(/ \/ /g, '/'); // math.js string -> hint text
+  function shapeProblem(o) {
+    const { lo, hi, y0 } = o, v = 'y';
+    const defined = ms => (ms || []).filter(m => Check.exprEq(m.ans, m.ans, v, lo, hi)); // a mistake can only be recognised where it exists
+    const yT = tq(q(y0)), wdT = o.u === 'ft' ? '62.5' : '9800';
+    const atY0 = s => s.replace(/\by\b/g, `(${y0})`);
+    const finalMistakes = defined(o.area.mistakes).map(m => ({ ans: atY0(m.ans), msg: m.msg })).filter(m => isFinite(Check.evalNum(m.ans)));
+    const steps = [
+      { id: o.unk.id, label: o.unk.label, kind: 'expr', v, lo, hi, ans: o.unk.ans, mistakes: defined(o.unk.mistakes), hint: o.unk.hint },
+      { id: 'A', label: 'Area \\(A(y)\\) of the horizontal slice at height \\(y\\)', kind: 'expr', v, lo, hi, ans: o.area.ans, mistakes: defined(o.area.mistakes), hint: o.area.hint },
+      { id: 'final', label: `\\(A(${yT})\\): the slice area at \\(y = ${yT}\\) (${o.u}²)`, kind: 'num', ans: o.answer, mistakes: finalMistakes, hint: `Put y = ${y0} into your A(y).` },
+    ];
+    const W = o.area.tex ? [`In a pumping problem (water pumped out over the top, \\(y = ${hi}\\), \\(\\rho g = ${wdT}\\)) this slice goes straight into the book's integral:`,
+      `$$W = \\int_{${lo}}^{${hi}} ${wdT}\\cdot A(y)\\cdot (${hi} - y)\\,dy = \\int_{${lo}}^{${hi}} ${wdT}\\cdot ${o.area.tex}\\cdot (${hi} - y)\\,dy$$`] : [];
+    return finalize({ statement: `${o.statement} Find ${o.unk.ask} at height \\(y\\), the slice area \\(A(y)\\), and \\(A(${yT})\\).`, steps, answer: o.answer,
+      solution: [...o.know, ...o.unk.lines, ...o.area.lines, `At \\(y = ${yT}\\):`, ...o.at, ...W],
+      truth: () => o.area.raw(y0), shape: { unk: o.unk.raw, A: o.area.raw, lo, hi, y0 } });
+  }
+  // Circle of radius R with its centre at height c (c = 0: origin at the centre; c = R: origin at the bottom).
+  // s names the unknown: x = half-width of a rectangle slice, r = radius of a circle slice.
+  function circleRim(R, c, s) {
+    const sh = c ? '(y - R)' : 'y', shN = c ? `(y - ${R})` : 'y', inner = c ? GP.poly(-1, 2 * R, 0) : GP.poly(-1, 0, R * R);
+    const lines = [`The equation it gives (Pythagoras): a point on the circle at height \\(y\\) is \\(${s}\\) across from the centre line and \\(${c ? 'y - R' : 'y'}\\) up from the centre.`,
+      `$$${s}^2 + ${sh}^2 = R^2$$`, `$$${s}^2 + ${shN}^2 = ${R}^2 = ${R * R}$$`,
+      `Solve for \\(${s}\\): subtract \\(${sh}^2\\) from both sides, then take the square root.`,
+      `$$${s} = \\sqrt{R^2 - ${sh}^2}$$`, `$$${s} = \\sqrt{${R * R} - ${shN}^2}$$`];
+    if (c) lines.push(`Multiply out (optional): \\((y - ${R})^2 = y^2 - ${2 * R}y + ${R * R}\\), so \\(${R * R} - (y^2 - ${2 * R}y + ${R * R}) = ${gpA(inner, 'y')}\\) and \\(${s} = \\sqrt{${gpA(inner, 'y')}}\\).`);
+    const at = y0 => { const d = y0 - c, m = R * R - d * d; return { m, line: `$$${s}(${y0})^2 = ${eqs([c ? `${R * R} - (${y0} - ${R})^2` : `${R * R} - ${tqp(q(y0))}^2`, ...(c ? [`${R * R} - ${tqp(q(d))}^2`] : []), `${R * R} - ${d * d}`, `${m}`])}$$` }; };
+    const raw = y => R * Math.sin(Math.acos((y - c) / R)); // trig form, independent of the Pythagoras form above
+    return { lines, ans: `sqrt(${R * R} - ${shN}^2)`, inner, at, raw, sh, shN };
+  }
+
+  function shBox(r) {
+    const u = r.pick(['ft', 'm']);
+    if (r.bool()) {
+      const l = r.pick([4, 5, 6, 8, 10, 12]), w = r.pick([2, 3, 4, 5]), H = r.pick([3, 4, 5, 6]), y0 = r.int(1, H - 1);
+      return shapeProblem({ u, y0, lo: 0, hi: H, answer: `${l * w}`,
+        statement: `A rectangular tank is ${l} ${u} long, ${w} ${u} wide and ${H} ${u} tall. Put the origin at the bottom of the tank, \\(y\\) up.`,
+        know: [`What you know: length \\(\\ell = ${l}\\), width \\(w = ${w}\\), height \\(H = ${H}\\). The walls go straight up, so every horizontal slice is the same \\(${l}\\) by \\(${w}\\) rectangle as the floor. Nothing depends on \\(y\\).`],
+        unk: { id: 'len', ask: 'the length of a horizontal slice', label: 'Length of the slice at height \\(y\\) (the long side)', ans: `${l}`, raw: () => l, hint: 'Vertical walls: the slice is as long as the tank.',
+          mistakes: [{ ans: `${H}`, msg: `${H} is the height. A horizontal slice is as long as the tank: ${l}.` }, { ans: `${w}`, msg: `${w} is the short side (the width). The long side is ${l}.` }],
+          lines: ['$$\\text{length}(y) = \\ell$$', `$$\\text{length}(y) = ${l}$$`] },
+        area: { ans: `${l * w}`, raw: () => l * w, hint: 'length × width', tex: `${l * w}`,
+          mistakes: [{ ans: `${l * w * H}`, msg: 'That is the volume of the whole tank. A slice is a flat rectangle: length × width.' }, { ans: `${l + w}`, msg: 'Multiply length by width, don\'t add.' }],
+          lines: ['A slice is a rectangle:', '$$A(y) = \\ell\\cdot w$$', `$$A(y) = ${l}\\times ${w} = ${l * w}$$`] },
+        at: [`$$A(${y0}) = ${l}\\times ${w} = ${l * w}$$`, 'Same as every other height.'] });
+    }
+    // Pool whose floor slopes in a straight line from the shallow end down to the deep end.
+    const L = r.pick([20, 24, 25, 30, 40]), W = r.pick([8, 10, 12, 15]), d1 = r.pick([1, 2, 3]), s = r.pick([2, 3, 4, 5]), d2 = d1 + s, y0 = r.int(1, s - 1);
+    const k = new Q(L, s), lin = GP.x(1, k), Ak = k.mul(W), len0 = k.mul(y0), A0 = len0.mul(W);
+    return shapeProblem({ u, y0, lo: 0, hi: s, answer: A0.str(),
+      statement: `A swimming pool is ${L} ${u} long and ${W} ${u} wide. Its floor slopes in a straight line from a depth of ${d1} ${u} at the shallow end to ${d2} ${u} at the deep end, and the pool is full. Put the origin at the deepest point of the floor (the bottom of the deep-end wall), \\(y\\) up. Look only at the water below the level of the shallow end's floor, \\(0 \\le y \\le ${s}\\).`,
+      know: [`What you know: pool length \\(L = ${L}\\), width \\(W = ${W}\\). The floor rises \\(s = ${d2} - ${d1} = ${s}\\) over the full length \\(L = ${L}\\). Below \\(y = ${s}\\) a horizontal slice of water starts at the deep-end wall and stops where it hits the sloped floor, so its length \\(\\ell\\) grows with \\(y\\).`],
+      unk: { id: 'len', ask: 'the length \\(\\ell\\) of a horizontal slice of water', label: `Length \\(\\ell\\) of the slice at height \\(y\\) (for \\(0 \\le y \\le ${s}\\))`, ans: lin.str('y'), raw: y => y / (s / L),
+        hint: `Similar triangles: ℓ/y = ${L}/${s}.`,
+        mistakes: [{ ans: `${L}`, msg: `Below y = ${s} the slice does not reach the shallow wall: it stops at the floor. Similar triangles: ℓ/y = ${L}/${s}.` }, { ans: `${new Q(s, L).str()} * y`, msg: `Flipped. Length goes with length: ℓ/y = L/s = ${L}/${s}.` }],
+        lines: ['The equation it gives (similar triangles: the wedge of water below height \\(y\\) has the same shape as the whole sloped part):', '$$\\frac{\\ell}{y} = \\frac{L}{s}$$', `$$\\frac{\\ell}{y} = \\frac{${L}}{${s}}$$`,
+          'Solve for \\(\\ell\\): multiply both sides by \\(y\\).', '$$\\ell = \\frac{L}{s}\\,y$$', `$$\\ell = ${eqs([`\\frac{${L}}{${s}}\\,y`, ty(k, 'y')])}$$`] },
+      area: { ans: GP.x(1, Ak).str('y'), raw: y => W * y / (s / L), hint: `A(y) = ${W}·ℓ.`,
+        mistakes: [{ ans: `${L * W}`, msg: `That is the full ${L} × ${W} slice, true only above y = ${s}. Lower down the length is ℓ = (${L}/${s})y.` }, { ans: lin.str('y'), msg: `That is the length alone. Multiply by the width ${W}.` }],
+        lines: ['A slice is a rectangle, \\(\\ell\\) long and \\(W\\) wide:', '$$A(y) = W\\cdot\\ell = W\\cdot\\frac{L}{s}\\,y$$', `$$A(y) = ${W}\\cdot ${ty(k, 'y')} = ${ty(Ak, 'y')}$$`, `$$${mulLine(q(W), k)}$$`, `(Above \\(y = ${s}\\) the slice is the full \\(${L}\\times ${W} = ${L * W}\\).)`] },
+      at: [`$$\\ell(${y0}) = ${mulLine(k, q(y0))}$$`, `$$A(${y0}) = ${mulLine(q(W), len0)}$$`] });
+  }
+
+  function shCyl(r) {
+    const u = r.pick(['ft', 'm']), R = r.pick([1, 2, 3, 4, 5, 6]), H = r.pick([4, 5, 6, 8, 10]), y0 = r.int(1, H - 1), byD = r.bool(), A0 = q(R * R);
+    return shapeProblem({ u, y0, lo: 0, hi: H, answer: exactPi(A0, true),
+      statement: `A cylindrical tank stands upright. It has ${byD ? 'diameter ' + 2 * R : 'radius ' + R} ${u} and height ${H} ${u}. Put the origin at the centre of the bottom, \\(y\\) up.`,
+      know: [`What you know: ${byD ? `diameter \\(d = ${2 * R}\\), height \\(H = ${H}\\). The radius is half the diameter: $$r = \\frac{d}{2}$$ $$r = \\frac{${2 * R}}{2} = ${R}$$` : `radius \\(r = ${R}\\), height \\(H = ${H}\\).`} The wall goes straight up, so every horizontal slice is the same circle as the floor. Nothing depends on \\(y\\).`],
+      unk: { id: 'rad', ask: 'the radius \\(r\\) of a horizontal slice', label: 'Radius \\(r\\) of the slice at height \\(y\\)', ans: `${R}`, raw: () => R, hint: byD ? 'Half the diameter.' : 'Straight walls: same radius at every height.',
+        mistakes: [...(byD ? [{ ans: `${2 * R}`, msg: `${2 * R} is the diameter. The radius is half: ${2 * R}/2 = ${R}.` }] : []), { ans: `${H}`, msg: `${H} is the height, not the radius.` }],
+        lines: ['$$r(y) = r$$', `$$r(y) = ${R}$$`] },
+      area: { ans: exactPi(A0, true), raw: () => Math.PI * R * R, hint: 'A = π r²', tex: piT(A0),
+        mistakes: [{ ans: `${R * R}`, msg: 'A circle\'s area is πr²: include π.' }, { ans: `2 * pi * ${R}`, msg: '2πr is the distance around the circle. Area is πr².' }, { ans: `pi * ${4 * R * R}`, msg: `Square the radius ${R}, not the diameter ${2 * R}.` }],
+        lines: ['A slice is a circle:', '$$A(y) = \\pi r^2$$', `$$A(y) = \\pi\\cdot ${R}^2 = \\pi\\cdot ${R}\\times ${R} = ${piT(A0)}$$`] },
+      at: [`$$A(${y0}) = \\pi\\cdot ${R}^2 = ${piT(A0)}${about(piT(A0), Math.PI * R * R)}$$`, 'Same as every other height.'] });
+  }
+
+  function shCone(r) {
+    const u = r.pick(['ft', 'm']), R = r.pick([1, 2, 3, 4, 5, 6]), H = r.pick([2, 3, 4, 5, 6, 8, 10]), k = new Q(R, H), kk = k.mul(k), down = r.bool(), y0 = r.int(1, H - 1), byD = r.next() < 0.3;
+    const lin = down ? GP.x(1, k) : GP.poly(k.neg(), R), ry0 = lin.at(y0), A0 = ry0.mul(ry0);
+    const given = byD ? `diameter ${2 * R} ${u}` : `radius ${R} ${u}`;
+    const half = byD ? [`The radius is half the diameter: $$R = \\frac{d}{2}$$ $$R = \\frac{${2 * R}}{2} = ${R}$$`] : [];
+    const raw = down ? y => R * y / H : y => R * (H - y) / H; // cone edge: straight line from the point to the rim
+    const common = { u, y0, lo: 0, hi: H, answer: exactPi(A0, true) };
+    const area = (letters, nums, ans, tex, mistakes) => ({ ans, tex, raw: y => Math.PI * raw(y) ** 2, hint: 'A = π r², with your r.', mistakes: [{ ans: ans.replace('pi * ', ''), msg: 'A circle\'s area is πr²: include π.' }, { ans: `pi * ${R * R}`, msg: `That uses the full radius ${R} for every slice. Use your r at height y.` }, ...mistakes],
+      lines: ['A slice is a circle:', `$$A(y) = \\pi r^2 = ${letters}$$`, `$$A(y) = ${nums}$$`] });
+    const atLines = [`$$${evalAt(rev(lin), q(y0), 'r')}$$`, `$$A(${y0}) = \\pi r^2 = ${eqs([`\\pi\\cdot ${tqp(ry0)}^2`, `\\pi\\cdot ${tq(A0)}`, piT(A0)])}${about(piT(A0), Math.PI * A0.v)}$$`];
+    if (down) return shapeProblem({ ...common,
+      statement: `A conical tank has its point (vertex) at the bottom. It is ${H} ${u} tall and the circle at the top has ${given}. Put the origin at the vertex, \\(y\\) up.`,
+      know: [`What you know: top radius \\(R = ${R}\\), height \\(H = ${H}\\), point at the bottom.`, ...half, `A horizontal slice is a circle. Its radius \\(r\\) grows from 0 at the point to \\(${R}\\) at the top.`],
+      unk: { id: 'rad', ask: 'the radius \\(r\\) of a horizontal slice', label: 'Radius \\(r\\) of the slice at height \\(y\\)', ans: lin.str('y'), raw, hint: `Similar triangles: r/y = ${R}/${H}.`,
+        mistakes: [{ ans: `${new Q(H, R).str()} * y`, msg: `Flipped. Radius goes with radius: r/y = R/H = ${R}/${H}.` }, { ans: `${R}`, msg: `${R} is the radius only at the top. Lower slices are smaller: r/y = ${R}/${H}.` }, { ans: `${2 * R}/${H} * y`, msg: `${2 * R} is the diameter. Use the radius ${R}: r/y = ${R}/${H}.` }, { ans: GP.poly(k.neg(), R).str('y'), msg: 'That is the point-up cone. Here the point is at the bottom, so r grows with y: r/y = R/H.' }],
+        lines: ['The equation it gives (similar triangles: the cone of water below height \\(y\\) has the same shape as the whole cone):', '$$\\frac{r}{y} = \\frac{R}{H}$$', `$$\\frac{r}{y} = \\frac{${R}}{${H}}$$`,
+          'Solve for \\(r\\): multiply both sides by \\(y\\).', '$$r = \\frac{R}{H}\\,y$$', `$$r = ${eqs([`\\frac{${R}}{${H}}\\,y`, ty(k, 'y')])}$$`] },
+      area: area('\\pi\\left(\\frac{R}{H}\\,y\\right)^2', `\\pi\\left(${ty(k, 'y')}\\right)^2 = ${tqp(k)}^2\\,\\pi y^2 = ${ty(kk, '\\pi y^2')}$$ $$${tqp(k)}^2 = ${mulLine(k, k)}`, `pi * ${kk.str()} * y^2`, ty(kk, '\\pi y^2'),
+        [{ ans: `pi * ${k.str()} * y`, msg: `Square the radius: A = π r² = π((${R}/${H})y)².` }]),
+      at: atLines });
+    return shapeProblem({ ...common,
+      statement: `A conical tank has its point (vertex) at the top. It is ${H} ${u} tall and the circle at the bottom has ${given}. Put the origin at the centre of the bottom, \\(y\\) up.`,
+      know: [`What you know: bottom radius \\(R = ${R}\\), height \\(H = ${H}\\), point at the top.`, ...half, `A horizontal slice is a circle. Its radius \\(r\\) shrinks from \\(${R}\\) at the bottom to 0 at the point. A slice at height \\(y\\) is \\(${H} - y\\) below the point.`],
+      unk: { id: 'rad', ask: 'the radius \\(r\\) of a horizontal slice', label: 'Radius \\(r\\) of the slice at height \\(y\\)', ans: ascS(lin, 'y'), raw, hint: `Similar triangles from the point: r/(${H} − y) = ${R}/${H}.`,
+        mistakes: [{ ans: `${k.str()} * y`, msg: `That is the point-down cone. Here the point is at the top, so r shrinks as y grows: r/(${H} − y) = ${R}/${H}.` }, { ans: `${R}`, msg: `${R} is the radius only at the bottom. Higher slices are smaller: r/(${H} − y) = ${R}/${H}.` }, { ans: `${new Q(H, R).str()} * (${H} - y)`, msg: `Flipped. Radius goes with radius: r/(${H} − y) = R/H = ${R}/${H}.` }],
+        lines: ['The equation it gives (similar triangles, measured down from the point):', '$$\\frac{r}{H - y} = \\frac{R}{H}$$', `$$\\frac{r}{${H} - y} = \\frac{${R}}{${H}}$$`,
+          'Solve for \\(r\\): multiply both sides by \\(H - y\\).', '$$r = \\frac{R}{H}(H - y)$$', `$$r = ${k.eq(1) ? '' : tq(k)}(${H} - y) = ${gpA(lin, 'y')}$$`, `$$${mulLine(k, q(H))}$$`] },
+      area: area('\\pi\\left(\\frac{R}{H}(H - y)\\right)^2', `\\pi\\left(${gpA(lin, 'y')}\\right)^2`, `pi * (${ascS(lin, 'y')})^2`, `\\pi\\left(${gpA(lin, 'y')}\\right)^2`,
+        [{ ans: `pi * ${kk.str()} * y^2`, msg: `That is the point-down cone. Here r = ${plain(ascS(lin, 'y'))}, so A = π(that)².` }]),
+      at: atLines });
+  }
+
+  // Horizontal cylinder and semicircle-ended trough: the slice is a rectangle, L long and 2x wide.
+  function roundTrough(r, kind) {
+    const u = r.pick(['ft', 'm']), R = r.pick([2, 3, 4, 5, 6, 10]), L = r.pick([6, 8, 10, 12, 15, 20]), atBottom = r.bool(), c = atBottom ? R : 0;
+    const lo = kind === 'hcyl' ? c - R : atBottom ? 0 : -R, hi = kind === 'hcyl' ? c + R : atBottom ? R : 0;
+    const y0 = r.int(lo + 1, hi - 1), rim = circleRim(R, c, 'x'), { m, line } = rim.at(y0), n = nthRoot(m, 2);
+    const A0 = n === null ? `${2 * L} * sqrt(${m})` : `${2 * L * n}`, A0T = n === null ? `${2 * L}\\sqrt{${m}}` : `${2 * L * n}`;
+    const statement = kind === 'hcyl'
+      ? `A cylindrical tank lies on its side. It is ${L} ${u} long and its circular ends have radius ${R} ${u}. Put the origin ${atBottom ? 'at the bottom of a circular end' : 'at the centre of a circular end'}, \\(y\\) up.`
+      : `A trough is ${L} ${u} long. Its ends are semicircles of radius ${R} ${u} with the flat side on top. Put the origin ${atBottom ? 'at the lowest point of an end' : 'at the centre of the flat top edge of an end'}, \\(y\\) up${atBottom ? '' : ` (so the bottom is at \\(y = -${R}\\))`}.`;
+    const other = c ? `sqrt(${R * R} - y^2)` : `sqrt(${R * R} - (y - ${R})^2)`;
+    return shapeProblem({ u, y0, lo, hi, answer: A0,
+      statement,
+      know: [`What you know: radius \\(R = ${R}\\), length \\(L = ${L}\\). With this origin the centre of the circle is at \\(y = ${c}\\)${c ? ' (one radius up from the bottom)' : ''}. A horizontal slice is a rectangle, \\(L\\) long and \\(2x\\) wide, where \\(x\\) is the half-width (centre line to the curved edge) at height \\(y\\).`],
+      unk: { id: 'half', ask: 'the half-width \\(x\\) of a horizontal slice', label: 'Half-width \\(x\\) of the slice at height \\(y\\) (centre line to the edge)', ans: rim.ans, raw: rim.raw, hint: `x² + ${rim.shN}² = ${R}².`,
+        mistakes: [{ ans: other, msg: c ? `That puts the centre at y = 0. Here the origin is at the bottom, so the centre is at y = ${R}: x² + (y − ${R})² = ${R}².` : `That puts the centre at y = ${R}. Here the origin is at the centre: x² + y² = ${R}².` }, { ans: `${R * R} - ${rim.shN}^2`, msg: 'That is x². Take the square root.' }, { ans: `2 * ${rim.ans}`, msg: 'That is the full width. x is half of it (centre line to the edge).' }],
+        lines: rim.lines },
+      area: { ans: `${2 * L} * ${rim.ans}`, raw: y => L * 2 * rim.raw(y), hint: `A = L · 2x = ${L} · 2x.`, tex: `${2 * L}\\sqrt{${R * R} - ${rim.shN}^2}`,
+        mistakes: [{ ans: `${L} * ${rim.ans}`, msg: 'x is only half the width. The slice is 2x wide: A = L·2x.' }, { ans: `2 * ${rim.ans}`, msg: `That is the width alone. Multiply by the length ${L}.` }, { ans: `pi * (${R * R} - ${rim.shN}^2)`, msg: `The slice is a rectangle (L long, 2x wide), not a circle. A = ${L}·2x.` }],
+        lines: ['A slice is a rectangle, \\(L\\) long and \\(2x\\) wide:', '$$A(y) = L\\cdot 2x = 2L\\sqrt{R^2 - ' + rim.sh + '^2}$$', `$$A(y) = ${L}\\cdot 2\\sqrt{${R * R} - ${rim.shN}^2} = ${2 * L}\\sqrt{${R * R} - ${rim.shN}^2}$$`, `$$${L}\\times 2 = ${2 * L}$$`] },
+      at: [line, `$$x(${y0}) = \\sqrt{${m}}${n === null ? '' : ` = ${n}`}$$`, `$$A(${y0}) = ${L}\\cdot 2\\cdot ${n === null ? `\\sqrt{${m}}` : n} = ${A0T}${n === null ? about(A0T, 2 * L * Math.sqrt(m)) : ''}$$`] });
+  }
+
+  function shSphere(r) {
+    const u = r.pick(['ft', 'm']), R = r.pick([2, 3, 4, 5, 6, 10]), kind = r.pick(['sc', 'sb', 'bowl', 'bowlc', 'dome']);
+    const c = kind === 'sb' || kind === 'bowl' ? R : 0;
+    const [lo, hi] = { sc: [-R, R], sb: [0, 2 * R], bowl: [0, R], bowlc: [-R, 0], dome: [0, R] }[kind];
+    const y0 = r.int(lo + 1, hi - 1), rim = circleRim(R, c, 'r'), { m, line } = rim.at(y0), A0 = q(m);
+    const statement = {
+      sc: `A spherical tank has radius ${R} ${u}. Put the origin at the centre of the sphere, \\(y\\) up (the tank runs from \\(y = -${R}\\) to \\(y = ${R}\\)).`,
+      sb: `A spherical tank has radius ${R} ${u}. Put the origin at the bottom of the tank, \\(y\\) up (the top is at \\(y = ${2 * R}\\)).`,
+      bowl: `A hemispherical bowl (flat side up) has radius ${R} ${u}. Put the origin at the bottom of the bowl, \\(y\\) up (the rim is at \\(y = ${R}\\)).`,
+      bowlc: `A hemispherical bowl (flat side up) has radius ${R} ${u}. Put the origin at the centre of the flat top, \\(y\\) up (the bottom of the bowl is at \\(y = -${R}\\)).`,
+      dome: `A hemispherical dome tank (flat side down) has radius ${R} ${u}. Put the origin at the centre of the flat floor, \\(y\\) up.`,
+    }[kind];
+    const other = c ? `sqrt(${R * R} - y^2)` : `sqrt(${R * R} - (y - ${R})^2)`;
+    return shapeProblem({ u, y0, lo, hi, answer: exactPi(A0, true),
+      statement,
+      know: [`What you know: sphere radius \\(R = ${R}\\). With this origin the centre of the sphere is at \\(y = ${c}\\)${c ? ' (one radius up from the bottom)' : ''}. A horizontal slice is a circle; its radius \\(r\\) is the distance from the centre line to the curved wall at height \\(y\\).`],
+      unk: { id: 'rad', ask: 'the radius \\(r\\) of a horizontal slice', label: 'Radius \\(r\\) of the slice at height \\(y\\)', ans: rim.ans, raw: rim.raw, hint: `r² + ${rim.shN}² = ${R}².`,
+        mistakes: [{ ans: other, msg: c ? `That puts the centre at y = 0. Here the origin is at the bottom, so the centre is at y = ${R}: r² + (y − ${R})² = ${R}².` : `That puts the centre at y = ${R}. Here the origin is at the centre: r² + y² = ${R}².` }, { ans: `${R * R} - ${rim.shN}^2`, msg: 'That is r². Take the square root.' }, { ans: `${R}`, msg: `${R} is the radius only through the centre. Other slices are smaller: r² + ${rim.shN}² = ${R}².` }],
+        lines: rim.lines },
+      area: { ans: `pi * (${ascS(rim.inner, 'y')})`, raw: y => Math.PI * rim.raw(y) ** 2, hint: 'A = π r²; squaring removes the square root.', tex: `\\pi\\left(${R * R} - ${rim.shN}^2\\right)`,
+        mistakes: [{ ans: ascS(rim.inner, 'y'), msg: 'A circle\'s area is πr²: include π.' }, { ans: `pi * ${rim.ans}`, msg: 'Square the radius: A = πr² = π(R² − …), no square root left.' }, { ans: `pi * ${R * R}`, msg: `That uses the sphere's radius ${R} for every slice. Use your r at height y.` }],
+        lines: ['A slice is a circle. Squaring \\(r\\) undoes the square root:', `$$A(y) = \\pi r^2 = \\pi\\left(R^2 - ${rim.sh}^2\\right)$$`, `$$A(y) = \\pi\\left(${R * R} - ${rim.shN}^2\\right)${c ? ` = \\pi\\left(${gpA(rim.inner, 'y')}\\right)` : ''}$$`] },
+      at: [line, `$$A(${y0}) = \\pi r^2 = \\pi\\cdot ${m} = ${piT(A0)}${about(piT(A0), Math.PI * m)}$$`] });
+  }
+
+  // Trough with flat (triangle or trapezoid) ends: slice = rectangle, length times the end's width at height y.
+  function flatTrough(r, kind) {
+    const u = r.pick(['ft', 'm']), len = r.pick([5, 6, 8, 10, 12, 20]), h = r.pick([1, 2, 3, 4]), y0 = r.int(1, Math.max(1, h - 1));
+    let lin, raw, know, lines, wMistakes, statement;
+    if (kind === 'tri') {
+      const b = r.pick([2, 3, 4, 6]), k = new Q(b, h), down = r.bool();
+      if (down) {
+        lin = GP.x(1, k); raw = y => b * y / h;
+        statement = `A trough is ${len} ${u} long. Its ends are triangles with the point down, ${b} ${u} across the top and ${h} ${u} deep. Put the origin at the point (the bottom of an end), \\(y\\) up.`;
+        know = [`What you know: top width \\(b = ${b}\\), depth \\(h = ${h}\\), length \\(\\ell = ${len}\\). The width \\(w\\) of a slice grows from 0 at the point to \\(${b}\\) at the top.`];
+        lines = ['The equation it gives (similar triangles: the triangle of water below height \\(y\\) has the same shape as the whole end):', '$$\\frac{w}{y} = \\frac{b}{h}$$', `$$\\frac{w}{y} = \\frac{${b}}{${h}}$$`,
+          'Solve for \\(w\\): multiply both sides by \\(y\\).', '$$w = \\frac{b}{h}\\,y$$', `$$w = ${eqs([`\\frac{${b}}{${h}}\\,y`, ty(k, 'y')])}$$`];
+        wMistakes = [{ ans: `${new Q(h, b).str()} * y`, msg: `Flipped. Width goes with width: w/y = b/h = ${b}/${h}.` }, { ans: `${b}`, msg: `${b} is the width only at the top. Lower down it is narrower: w/y = ${b}/${h}.` }, { ans: GP.poly(k.neg(), b).str('y'), msg: 'That is the point-up triangle. Here the point is at the bottom, so w grows with y: w/y = b/h.' }];
+      } else {
+        lin = GP.poly(k.neg(), b); raw = y => b * (h - y) / h;
+        statement = `A tank is ${len} ${u} long. Its ends are triangles with the point up, ${b} ${u} across the bottom and ${h} ${u} tall. Put the origin at the middle of the bottom edge of an end, \\(y\\) up.`;
+        know = [`What you know: bottom width \\(b = ${b}\\), height \\(h = ${h}\\), length \\(\\ell = ${len}\\). The width \\(w\\) of a slice shrinks from \\(${b}\\) at the bottom to 0 at the point. A slice at height \\(y\\) is \\(${h} - y\\) below the point.`];
+        lines = ['The equation it gives (similar triangles, measured down from the point):', '$$\\frac{w}{h - y} = \\frac{b}{h}$$', `$$\\frac{w}{${h} - y} = \\frac{${b}}{${h}}$$`,
+          'Solve for \\(w\\): multiply both sides by \\(h - y\\).', '$$w = \\frac{b}{h}(h - y)$$', `$$w = ${k.eq(1) ? '' : tq(k)}(${h} - y) = ${gpA(lin, 'y')}$$`, `$$${mulLine(k, q(h))}$$`];
+        wMistakes = [{ ans: `${k.str()} * y`, msg: `That is the point-down triangle. Here the point is at the top, so w shrinks as y grows: w/(${h} − y) = ${b}/${h}.` }, { ans: `${b}`, msg: `${b} is the width only at the bottom: w/(${h} − y) = ${b}/${h}.` }];
+      }
+    } else {
+      const b1 = r.pick([2, 3, 4, 6]), b2 = r.pick([2, 3, 4, 6, 8].filter(x => x !== b1)), k = new Q(b2 - b1, h);
+      lin = GP.poly(k, b1); raw = y => b1 + (b2 - b1) * (y / h);
+      statement = `A trough is ${len} ${u} long. Its ends are trapezoids ${b1} ${u} wide at the bottom, ${b2} ${u} wide at the top and ${h} ${u} tall. Put the origin at the middle of the bottom edge of an end, \\(y\\) up.`;
+      know = [`What you know: bottom width \\(b_1 = ${b1}\\), top width \\(b_2 = ${b2}\\), height \\(h = ${h}\\), length \\(\\ell = ${len}\\). The width changes in a straight line from \\(${b1}\\) at \\(y = 0\\) to \\(${b2}\\) at \\(y = ${h}\\).`];
+      lines = [`The equation it gives: over the height \\(h\\) the width changes by \\(b_2 - b_1\\), so it changes by \\(\\frac{b_2 - b_1}{h}\\) per unit of height, starting from \\(b_1\\):`, '$$w = b_1 + \\frac{b_2 - b_1}{h}\\,y$$',
+        `$$w = ${b1} + \\frac{${b2} - ${b1}}{${h}}\\,y = ${gpA(lin, 'y')}$$`, `$$\\frac{${b2} - ${b1}}{${h}} = \\frac{${b2 - b1}}{${h}} = ${tq(k)}$$`,
+        `Check the top: $$${evalAt(rev(lin), q(h), 'w')}$$ which is \\(b_2\\).`];
+      wMistakes = [{ ans: `${new Q(b2, h).str()} * y`, msg: `That is a triangle (width 0 at the bottom). A trapezoid starts at b₁ = ${b1}: w = ${b1} + ((${b2} − ${b1})/${h})y.` }, { ans: `${b1} + ${new Q(b2, h).str()} * y`, msg: `Use the change in width, ${b2} − ${b1}, not ${b2}.` }, { ans: `${b2} + ${new Q(b1 - b2, h).str()} * y`, msg: `Upside down: at y = 0 (the bottom) the width is b₁ = ${b1}.` }];
+    }
+    const Ag = lin.scale(len), w0 = lin.at(y0), AgT = Ag.t.length > 1 ? `\\left(${gpA(Ag, 'y')}\\right)` : gpT(Ag, 'y');
+    return shapeProblem({ u, y0, lo: 0, hi: h, answer: w0.mul(len).str(), statement, know,
+      unk: { id: 'wid', ask: 'the width \\(w\\) of a horizontal slice', label: 'Width \\(w\\) of the slice at height \\(y\\) (across the end)', ans: ascS(lin, 'y'), raw, hint: kind === 'tri' ? 'Similar triangles.' : 'Bottom width plus (change in width ÷ height) times y.', mistakes: wMistakes, lines },
+      area: { ans: ascS(Ag, 'y'), raw: y => len * raw(y), hint: `A = ${len}·w.`, tex: AgT,
+        mistakes: [{ ans: lin.str('y'), msg: `That is the width alone. A slice is a rectangle: multiply by the length ${len}.` }, { ans: `${len * Math.max(raw(0), raw(h))}`, msg: 'The width changes with y; use your w(y), not the widest width.' }],
+        lines: ['A slice is a rectangle, \\(\\ell\\) long and \\(w\\) wide:', '$$A(y) = \\ell\\cdot w$$', `$$A(y) = ${len}\\left(${gpA(lin, 'y')}\\right) = ${gpA(Ag, 'y')}$$`, ...rev(lin).t.map(t => `$$${mulLine(q(len), t.c)}$$`)] },
+      at: [`$$${evalAt(rev(lin), q(y0), 'w')}$$`, `$$A(${y0}) = \\ell\\cdot w = ${mulLine(q(len), w0)}$$`] });
+  }
+
+  function shPara(r) {
+    const u = r.pick(['ft', 'm']), len = r.pick([5, 6, 8, 10, 12]);
+    const [a, N] = r.pick([[q(1), 2], [q(1), 3], [q(2), 2], [q(2), 1], [q(3), 1], [q(4), 1], [new Q(1, 4), 4], [new Q(1, 4), 2], [new Q(1, 2), 2], [new Q(1, 2), 4]]);
+    const h = a.mul(N * N), inv = q(1).div(a), byWidth = r.bool();
+    const ns = []; for (let i = 1; i < N; i++) if (a.mul(i * i).d === 1) ns.push(i);
+    const n = ns.length ? r.pick(ns) : N, y0 = a.mul(n * n).v;
+    const xS = inv.eq(1) ? 'sqrt(y)' : `sqrt(${inv.str()} * y)`, xT = `\\sqrt{${ty(inv, 'y')}}`;
+    const eqT = `y = ${ty(a, 'x^2')}`;
+    const solveA = byWidth ? [`First find \\(a\\): the top corners \\((\\pm\\frac{b}{2}, h) = (\\pm ${N}, ${h.v})\\) are on the parabola \\(y = ax^2\\).`, '$$h = a\\left(\\frac{b}{2}\\right)^2$$', `$$${h.v} = a\\cdot ${N}^2${N === 1 ? '' : ` = ${N * N}a`},\\qquad a = \\frac{${h.v}}{${N * N}} = ${tq(a)}$$`, `So the edge is \\(${eqT}\\).`] : [];
+    return shapeProblem({ u, y0, lo: 0, hi: h.v, answer: `${2 * len * n}`,
+      statement: byWidth
+        ? `A trough is ${len} ${u} long. Its ends are parabolas \\(y = ax^2\\) (vertex down), ${2 * N} ${u} across the top and ${h.v} ${u} tall. Put the origin at the vertex, \\(y\\) up.`
+        : `A trough is ${len} ${u} long. Its ends are the region between \\(${eqT}\\) and the line \\(y = ${h.v}\\) (units ${u}). The origin is at the vertex, \\(y\\) up.`,
+      know: [`What you know: ${byWidth ? `top width \\(b = ${2 * N}\\), height \\(h = ${h.v}\\)` : `the edge is \\(${eqT}\\), the top is at \\(y = ${h.v}\\)`}, length \\(\\ell = ${len}\\). A horizontal slice is a rectangle, \\(\\ell\\) long and \\(2x\\) wide, where \\(x\\) is the half-width (centre line to the edge) at height \\(y\\).`, ...solveA],
+      unk: { id: 'half', ask: 'the half-width \\(x\\) of a horizontal slice', label: 'Half-width \\(x\\) of the slice at height \\(y\\) (centre line to the edge)', ans: xS, raw: y => Math.sqrt(y / a.v), hint: `Solve y = ${a.eq(1) ? '' : `(${a.str()})`}x² for x.`,
+        mistakes: [...(a.eq(1) ? [] : [{ ans: `sqrt(${a.str()} * y)`, msg: `Divide by a, don't multiply: y = ax² gives x² = y/a = ${inv.str()}y.` }]), { ans: inv.eq(1) ? 'y' : `${inv.str()} * y`, msg: 'That is x². Take the square root.' }, { ans: `2 * ${xS}`, msg: 'That is the full width. x is half of it (centre line to the edge).' }],
+        lines: ['The equation it gives: the point on the edge at height \\(y\\) is on the parabola.', '$$y = ax^2$$', `$$${eqT}$$`, 'Solve for \\(x\\): divide by \\(a\\), then take the square root.',
+          '$$x = \\sqrt{\\frac{y}{a}}$$', `$$x = ${inv.eq(1) ? '\\sqrt{y}' : `\\sqrt{\\frac{y}{${tq(a)}}} = ${xT}`}$$`] },
+      area: { ans: `${2 * len} * ${xS}`, raw: y => len * 2 * Math.sqrt(y / a.v), hint: `A = ${len}·2x.`, tex: `${2 * len}${xT}`,
+        mistakes: [{ ans: `${len} * ${xS}`, msg: 'x is only half the width. The slice is 2x wide: A = ℓ·2x.' }, { ans: `2 * ${xS}`, msg: `That is the width alone. Multiply by the length ${len}.` }],
+        lines: ['A slice is a rectangle, \\(\\ell\\) long and \\(2x\\) wide:', '$$A(y) = \\ell\\cdot 2x = 2\\ell\\sqrt{\\frac{y}{a}}$$', `$$A(y) = ${len}\\cdot 2${xT} = ${2 * len}${xT}$$`, `$$${len}\\times 2 = ${2 * len}$$`] },
+      at: [`$$x(${y0}) = \\sqrt{${y0} \\div ${tq(a)}} = \\sqrt{${n * n}} = ${n}$$`, `$$A(${y0}) = ${len}\\cdot 2\\cdot ${n} = ${2 * len * n}$$`] });
   }
 
   // ---------- assigned homework: the exact Briggs/Cochran problems (6.4, 6.5) ----------
@@ -1014,6 +1247,15 @@
     { id: 'arc-x', sec: '6.5', name: 'Arc length y = f(x)', card: 'arc', gen: r => arcLength(r, 'x') },
     { id: 'arc-y', sec: '6.5', name: 'Arc length x = g(y)', card: 'arc', gen: r => arcLength(r, 'y') },
     { id: 'arc-setup', sec: '6.5', name: 'Arc length: set up only', card: 'arc', gen: arcSetup },
+    { id: 'sh-box', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Rectangular tank / sloped pool', card: 'sh-box', gen: shBox },
+    { id: 'sh-cyl', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Upright cylinder', card: 'sh-cyl', gen: shCyl },
+    { id: 'sh-cone', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Cone (point down or up)', card: 'sh-cone', gen: shCone },
+    { id: 'sh-hcyl', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Cylinder lying on its side', card: 'sh-hcyl', gen: r => roundTrough(r, 'hcyl') },
+    { id: 'sh-sphere', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Sphere / hemisphere', card: 'sh-sphere', gen: shSphere },
+    { id: 'sh-tri', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: triangle ends (point up/down)', card: 'sh-tri', gen: r => flatTrough(r, 'tri') },
+    { id: 'sh-trap', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: trapezoid ends', card: 'sh-trap', gen: r => flatTrough(r, 'trap') },
+    { id: 'sh-semi', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: semicircle ends', card: 'sh-semi', gen: r => roundTrough(r, 'semi') },
+    { id: 'sh-para', sec: 'Shapes', head: 'Shapes: width, radius and area at height y', name: 'Trough: parabola ends', card: 'sh-para', gen: shPara },
     { id: 'spring', sec: '6.7', name: 'Work: springs', card: 'spring', gen: spring },
     { id: 'chain', sec: '6.7', name: 'Work: lifting chains/ropes', card: 'chain', gen: chain },
     { id: 'pump', sec: '6.7', name: 'Work: pumping liquids', card: 'pump', gen: pump },

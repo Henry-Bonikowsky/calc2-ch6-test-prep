@@ -6,6 +6,7 @@ Covers Briggs/Cochran 6.1, 6.2, 6.3-6.4 (incl. general slicing with known cross-
 - `problems.js` generators (exact answers, per-step checks, mistake hints, worked solutions)
 - `check.js` answer checking (math.js; numeric equivalence at random points)
 - Type `hw` serves the exact assigned book problems (6.4 #5,6,9,12,13,15,20,22,24,35,39-44,53; 6.5 #3-8,10), each step-checked.
+- Types `sh-*` ("Shapes" section) drill the slice set-up for pumping/force: width or radius at height y, then A(y), for tanks, cones, spheres and troughs.
 - `coverage.md` lists what the test covers, each topic with its source and the site type that drills it.
 - `drill.js` "which method?" questions, `cards.js` formula cards, `app.js` UI
 - Progress lives in localStorage key `ma172ch6.v1`.

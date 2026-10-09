@@ -13,7 +13,7 @@
     for (const m of missed) s.miss[m] = (s.miss[m] || 0) + 1;
     save();
   }
-  const STEP_NAMES = { a: 'lower bound', b: 'upper bound', R: 'outer radius R', r: 'inner radius r', radius: 'shell radius', height: 'shell height', integrand: 'integrand', anti: 'antiderivative', final: 'final answer', s: 'position s(t)', v: 'velocity v(t)', z0: 'zero of v', z1: 'second zero of v', z: 'zero of v', disp: 'displacement', c: 'crossing point', A1: 'left piece area', A2: 'right piece area', d: 'derivative', one: "1 + (f')²", k: 'spring constant k', delta: 'weight per length', top: 'top-half work', bot: 'bottom-half work', chainW: 'chain work', loadW: 'load work', A: 'slice area A(y)', lift: 'lift distance', depth: 'depth', w: 'strip width', side: 'slice length s' };
+  const STEP_NAMES = { a: 'lower bound', b: 'upper bound', R: 'outer radius R', r: 'inner radius r', radius: 'shell radius', height: 'shell height', integrand: 'integrand', anti: 'antiderivative', final: 'final answer', s: 'position s(t)', v: 'velocity v(t)', z0: 'zero of v', z1: 'second zero of v', z: 'zero of v', disp: 'displacement', c: 'crossing point', A1: 'left piece area', A2: 'right piece area', d: 'derivative', one: "1 + (f')²", k: 'spring constant k', delta: 'weight per length', top: 'top-half work', bot: 'bottom-half work', chainW: 'chain work', loadW: 'load work', A: 'slice area A(y)', lift: 'lift distance', depth: 'depth', w: 'strip width', side: 'slice length s', len: 'slice length', rad: 'slice radius r', half: 'half-width x', wid: 'slice width w' };
   const stepName = id => id.startsWith('w-') ? 'washer ' + STEP_NAMES[id.slice(2)] : id.startsWith('s-') ? 'shell ' + STEP_NAMES[id.slice(2)] : STEP_NAMES[id] || id;
 
   function weightedPick(items, w) {
@@ -117,7 +117,7 @@
     panel.append(h('button', { class: 'type-btn' + (!practice.sel ? ' sel' : ''), onclick: () => { practice.sel = null; practice.p = null; renderPractice(); } }, h('b', {}, 'Smart: weak spots first'), ''));
     let sec = '';
     for (const t of Gen.TYPES) {
-      if (t.sec !== sec) { sec = t.sec; panel.append(h('h3', {}, sec)); }
+      if (t.sec !== sec) { sec = t.sec; panel.append(h('h3', {}, t.head || sec)); }
       const sel = practice.sel && practice.sel.length === 1 && practice.sel[0] === t.id;
       panel.append(h('button', { class: 'type-btn' + (sel ? ' sel' : ''), onclick: () => { practice.sel = [t.id]; practice.p = null; renderPractice(); } }, h('span', {}, t.name), dots(t.id)));
     }
